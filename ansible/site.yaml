@@ -1,0 +1,7 @@
+---
+- name: Bootstrap libvirt hypervisor
+  hosts: hypervisors
+  become: true
+
+  roles:
+    - libvirt_host

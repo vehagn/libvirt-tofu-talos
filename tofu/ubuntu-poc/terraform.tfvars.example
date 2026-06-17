@@ -1,0 +1,11 @@
+libvirt_uri = "qemu+ssh://root@192.168.1.100/system"
+
+ssh_authorized_keys = [
+  "ssh-ed25519 AAAA... your-key-comment",
+]
+
+# Optional overrides (defaults shown)
+# vm_name         = "ubuntu-poc"
+# vm_memory_mb    = 2048
+# vm_vcpu_count   = 2
+# vm_disk_size_gb = 20

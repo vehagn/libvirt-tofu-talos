@@ -14,6 +14,7 @@ crash.*.log
 # control as they are data points which are potentially sensitive and subject
 # to change depending on the environment.
 *.tfvars
+!*.tfvars.example
 *.tfvars.json
 
 # Ignore override files as they are usually used to override resources locally and so
@@ -42,3 +43,13 @@ terraform.rc
 # Optional: ignore plan files saved before destroying Terraform configuration
 # Uncomment the line below if you want to ignore planout files.
 # planout
+
+# Ansible
+*.retry
+ansible/inventory.local.yaml
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*~

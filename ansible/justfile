@@ -1,0 +1,11 @@
+set shell := ["bash", "-c"]
+
+ansible_inventory := env_var_or_default("ANSIBLE_INVENTORY", "inventory.local.yaml")
+
+[private]
+default:
+    @just --list
+
+# Bootstrap the hypervisor with Ansible (pass extra args e.g. --check for dry run)
+bootstrap *args:
+    ansible-playbook -i {{ansible_inventory}} site.yaml {{args}}
