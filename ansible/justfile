@@ -1,4 +1,4 @@
-set shell := ["bash", "-c"]
+set shell := ["zsh", "-lc"]
 
 ansible_inventory := env_var_or_default("ANSIBLE_INVENTORY", "inventory.local.yaml")
 
