@@ -1,3 +1,7 @@
+set shell := ["bash", "-c"]
+set dotenv-filename := "setup.env"
+set dotenv-load
+
 mod ansible "ansible/justfile"
 mod tofu "tofu/justfile"
 
@@ -5,13 +9,55 @@ mod tofu "tofu/justfile"
 default:
     @just --list
 
-# Install ansible and opentofu (macOS via Homebrew, Debian/Ubuntu via apt)
+# Interactively create setup.env with hypervisor host and user
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -rp "Hypervisor host (IP or hostname): " host
+    read -rp "Hypervisor user [root]: " user
+    user="${user:-root}"
+    printf 'HYPERVISOR_HOST=%s\nHYPERVISOR_USER=%s\n' "$host" "$user" > setup.env
+    echo "Created setup.env — run 'just configure' to generate config files"
+
+# Generate ansible/inventory.local.yaml and tofu/ubuntu/terraform.tfvars from setup.env
+configure:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    envsubst '${HYPERVISOR_HOST} ${HYPERVISOR_USER}' < ansible/inventory.yaml > ansible/inventory.local.yaml
+    echo "Created ansible/inventory.local.yaml"
+    ssh_keys=$(ssh-add -L 2>/dev/null || true)
+    if [[ -z "$ssh_keys" ]]; then
+        for f in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub ~/.ssh/id_ecdsa.pub; do
+            [[ -f "$f" ]] && ssh_keys+="$(cat "$f")"$'\n'
+        done
+        ssh_keys="${ssh_keys%$'\n'}"
+    fi
+    if [[ -z "$ssh_keys" ]]; then
+        echo "Error: no SSH keys found — load keys with ssh-add, or place a public key in ~/.ssh/*.pub" >&2
+        exit 1
+    fi
+    keys_hcl=""
+    while IFS= read -r key; do
+        [[ -n "$key" ]] && keys_hcl+="  \"${key}\","$'\n'
+    done <<< "$ssh_keys"
+    {
+        printf 'libvirt_uri = "qemu+ssh://%s@%s/system"\n\n' "$HYPERVISOR_USER" "$HYPERVISOR_HOST"
+        printf 'ssh_authorized_keys = [\n%s]\n\n' "$keys_hcl"
+        printf '# Optional overrides (defaults shown)\n'
+        printf '# vm_name         = "ubuntu"\n'
+        printf '# vm_memory_mb    = 2048\n'
+        printf '# vm_vcpu_count   = 2\n'
+        printf '# vm_disk_size_gb = 20\n'
+    } > tofu/ubuntu/terraform.tfvars
+    echo "Created tofu/ubuntu/terraform.tfvars ($(echo "$ssh_keys" | grep -c .) SSH key(s))"
+
+# Install ansible, opentofu, and envsubst (macOS via Homebrew, Debian/Ubuntu via apt)
 install-deps:
     #!/usr/bin/env bash
     set -euo pipefail
     case "$(uname -s)" in
         Darwin)
-            brew install ansible opentofu
+            brew install ansible opentofu gettext
             ;;
         Linux)
             if [[ ! -f /etc/debian_version ]]; then
@@ -20,7 +66,7 @@ install-deps:
             fi
             # Ansible
             sudo apt-get update -qq
-            sudo apt-get install -y ansible
+            sudo apt-get install -y ansible gettext-base
 
             # OpenTofu via official apt repo
             sudo install -m 0755 -d /etc/apt/keyrings

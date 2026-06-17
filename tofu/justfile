@@ -1,9 +1,7 @@
 set shell := ["bash", "-c"]
 
+mod ubuntu "ubuntu/justfile"
+
 [private]
 default:
     @just --list
-
-# Provision the Ubuntu PoC VM with OpenTofu
-ubuntu:
-    cd ubuntu-poc && tofu init && tofu apply

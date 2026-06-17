@@ -11,20 +11,23 @@ Bootstrap a KVM hypervisor with Ansible, then manage VMs with OpenTofu and libvi
 
 ## Quick Start
 
-### 1. Bootstrap the hypervisor
+### 1. Configure the hypervisor connection
 
 ```bash
-cp ansible/inventory.yaml ansible/inventory.local.yaml
-# Edit inventory.local.yaml with your host IP and user
+just setup       # prompts for host and user, writes setup.env
+just configure   # generates inventory.local.yaml and terraform.tfvars (SSH keys from agent/~/.ssh/*.pub)
+```
+
+### 2. Bootstrap the hypervisor
+
+```bash
 just ansible bootstrap
 ```
 
-### 2. Provision an Ubuntu VM
+### 3. Provision an Ubuntu VM
 
 ```bash
-cp tofu/ubuntu-poc/terraform.tfvars.example tofu/ubuntu-poc/terraform.tfvars
-# Edit terraform.tfvars with your libvirt URI and SSH public key
-just tofu ubuntu
+just tofu ubuntu apply
 ```
 
 ## Requirements
@@ -45,5 +48,5 @@ ansible/
 
 tofu/
   modules/vm/           Reusable libvirt VM module (cloud-init, disk, network)
-  ubuntu-poc/           Ubuntu 24.04 LTS proof-of-concept environment
+  ubuntu/           Ubuntu 24.04 LTS proof-of-concept environment
 ```

@@ -6,23 +6,26 @@ Manages VMs on the libvirt hypervisor via the `dmacvicar/libvirt` provider.
 
 ```
 modules/vm/       Reusable module: single cloud-init VM on libvirt
-ubuntu-poc/       Ubuntu 24.04 LTS proof-of-concept environment
+ubuntu/       Ubuntu 24.04 LTS proof-of-concept environment
 ```
 
 ## Running an environment
 
 From the project root:
 ```bash
-just tofu ubuntu          # init + apply
+just configure                  # generate terraform.tfvars from setup.env
+just tofu ubuntu init           # first time only
+just tofu ubuntu apply
 ```
 
 Or directly from the environment directory:
 ```bash
-cd tofu/ubuntu-poc
-tofu init                 # first time only
-tofu plan
-tofu apply
-tofu destroy
+cd tofu/ubuntu
+just configure   # generate terraform.tfvars
+just init        # first time only
+just plan
+just apply
+just destroy
 ```
 
 ## Module: modules/vm
@@ -46,11 +49,17 @@ The `libvirt_uri` variable controls the hypervisor connection:
 - Remote via SSH: `qemu+ssh://user@host/system`
 - Local (testing): `qemu:///system`
 
+## Provider conventions
+
+Every module (not just root modules) must declare its provider dependencies in a `versions.tf` with a `required_providers` block. OpenTofu does not inherit provider source from the root — omitting it causes OpenTofu to guess `hashicorp/<name>`, which fails for third-party providers like `dmacvicar/libvirt`.
+
 ## Adding an environment
 
 1. Create `tofu/<environment>/`
-2. Copy the structure from `ubuntu-poc/` as a starting point
+2. Copy the structure from `ubuntu/` as a starting point
 3. Adjust `versions.tf`, `variables.tf`, and `main.tf` as needed
+4. Add a `configure` recipe to `tofu/<environment>/justfile` that uses `envsubst` on the tfvars example
+5. Wire the new environment into `tofu/justfile` as a `mod` and add it to the root `configure` task
 
 ## State
 

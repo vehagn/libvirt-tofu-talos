@@ -7,14 +7,14 @@ Manages VMs on the libvirt hypervisor via the [
 
 ```bash
 # Copy the example vars file and fill in your details
-cp ubuntu-poc/terraform.tfvars.example ubuntu-poc/terraform.tfvars
-$EDITOR ubuntu-poc/terraform.tfvars
+cp ubuntu/terraform.tfvars.example ubuntu/terraform.tfvars
+$EDITOR ubuntu/terraform.tfvars
 
 # Provision
 just ubuntu
 
 # Destroy
-cd ubuntu-poc && tofu destroy
+cd ubuntu && tofu destroy
 ```
 
 From the project root: `just tofu ubuntu`
@@ -30,7 +30,7 @@ modules/vm/                     Reusable VM module
     user-data.tftpl             cloud-config: user, SSH keys, qemu-guest-agent
     meta-data.tftpl             instance-id and hostname
 
-ubuntu-poc/                     Ubuntu 24.04 LTS environment
+ubuntu/                     Ubuntu 24.04 LTS environment
   versions.tf                   Provider requirements (dmacvicar/libvirt ~> 0.8)
   main.tf                       Storage pool, NAT network, VM module call
   variables.tf
@@ -57,5 +57,5 @@ The base image is downloaded once and used as a backing store; per-VM disks only
 ## Adding an environment
 
 1. Create a new directory under `tofu/`
-2. Copy `ubuntu-poc/` as a starting point
+2. Copy `ubuntu/` as a starting point
 3. Add a recipe to `tofu/justfile`

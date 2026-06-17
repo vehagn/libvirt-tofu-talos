@@ -11,7 +11,7 @@ variable "ssh_authorized_keys" {
 variable "vm_name" {
   description = "VM name"
   type        = string
-  default     = "ubuntu-poc"
+  default     = "ubuntu"
 }
 
 variable "vm_memory_mb" {

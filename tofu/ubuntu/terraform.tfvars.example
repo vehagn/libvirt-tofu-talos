@@ -1,0 +1,12 @@
+libvirt_uri = "qemu+ssh://${HYPERVISOR_USER}@${HYPERVISOR_HOST}/system"
+
+# SSH keys are auto-populated by `just configure` from the ssh-agent or ~/.ssh/*.pub
+ssh_authorized_keys = [
+  "ssh-ed25519 AAAA...",
+]
+
+# Optional overrides (defaults shown)
+# vm_name         = "ubuntu"
+# vm_memory_mb    = 2048
+# vm_vcpu_count   = 2
+# vm_disk_size_gb = 20

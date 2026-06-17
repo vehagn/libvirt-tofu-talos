@@ -44,6 +44,9 @@ terraform.rc
 # Uncomment the line below if you want to ignore planout files.
 # planout
 
+# Local hypervisor config
+setup.env
+
 # Ansible
 *.retry
 ansible/inventory.local.yaml

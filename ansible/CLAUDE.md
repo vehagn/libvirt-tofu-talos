@@ -5,9 +5,8 @@ One-time bootstrap of a Debian 13 host with libvirt, QEMU, and required dependen
 ## Running
 
 ```bash
-# Copy and edit the inventory for your environment
-cp inventory.yaml inventory.local.yaml
-$EDITOR inventory.local.yaml
+# Generate inventory.local.yaml from setup.env (run from project root)
+just configure
 
 # Dry run (no changes)
 just bootstrap --check
@@ -22,7 +21,7 @@ From the project root: `just ansible bootstrap` / `just ansible bootstrap --chec
 
 ```
 site.yaml                  Main playbook — applies libvirt_host to the hypervisors group
-inventory.yaml             Example inventory (gitignored when named inventory.local.yaml)
+inventory.yaml             envsubst template — use `just configure` to generate inventory.local.yaml
 roles/libvirt_host/
   defaults/main.yaml       Package list and tuneable defaults
   tasks/main.yaml          Install packages, enable service, add user to group

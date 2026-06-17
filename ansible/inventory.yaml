@@ -1,13 +1,13 @@
 ---
-# Copy this file to inventory.local.yaml and edit it for your environment.
+# Template — run `just configure` to generate inventory.local.yaml from setup.env.
 # inventory.local.yaml is gitignored.
 all:
   children:
     hypervisors:
       hosts:
         hypervisor-01:
-          ansible_host: 192.168.1.100
-          ansible_user: root
+          ansible_host: ${HYPERVISOR_HOST}
+          ansible_user: ${HYPERVISOR_USER}
           # ansible_ssh_private_key_file: ~/.ssh/id_ed25519
 
       vars:
