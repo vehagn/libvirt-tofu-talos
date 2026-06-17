@@ -5,18 +5,40 @@ locals {
 resource "libvirt_pool" "main" {
   name = "tofu-poc"
   type = "dir"
-  path = "/var/lib/libvirt/images/tofu-poc"
+
+  target = {
+    path = "/var/lib/libvirt/images/tofu-poc"
+  }
+
+  create = {
+    build     = true
+    start     = true
+    autostart = true
+  }
 }
 
 resource "libvirt_network" "main" {
   name      = "tofu-net"
-  mode      = "nat"
-  addresses = ["192.168.100.0/24"]
   autostart = true
 
-  dns {
-    enabled = true
+  forward = {
+    mode = "nat"
   }
+
+  ips = [
+    {
+      address = "192.168.100.1"
+      prefix  = 24
+      dhcp = {
+        ranges = [
+          {
+            start = "192.168.100.2"
+            end   = "192.168.100.254"
+          }
+        ]
+      }
+    }
+  ]
 }
 
 module "ubuntu" {

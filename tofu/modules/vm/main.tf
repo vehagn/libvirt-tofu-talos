@@ -1,23 +1,44 @@
 # Base cloud image — downloaded once per pool, used as a shared backing store
 resource "libvirt_volume" "base" {
-  name   = "${var.name}-base.qcow2"
-  pool   = var.pool_name
-  source = var.base_image_source
-  format = "qcow2"
+  name = "${var.name}-base.qcow2"
+  pool = var.pool_name
+
+  target = {
+    format = {
+      type = "qcow2"
+    }
+  }
+
+  create = {
+    content = {
+      url = var.base_image_source
+    }
+  }
 }
 
 # Per-VM overlay disk — only stores deltas from the base image
 resource "libvirt_volume" "disk" {
-  name           = "${var.name}.qcow2"
-  pool           = var.pool_name
-  base_volume_id = libvirt_volume.base.id
-  size           = var.disk_size_gb * 1073741824
-  format         = "qcow2"
+  name          = "${var.name}.qcow2"
+  pool          = var.pool_name
+  capacity      = var.disk_size_gb
+  capacity_unit = "GiB"
+
+  target = {
+    format = {
+      type = "qcow2"
+    }
+  }
+
+  backing_store = {
+    path = libvirt_volume.base.path
+    format = {
+      type = "qcow2"
+    }
+  }
 }
 
 resource "libvirt_cloudinit_disk" "init" {
   name = "${var.name}-cloudinit.iso"
-  pool = var.pool_name
 
   user_data = templatefile("${path.module}/templates/user-data.tftpl", {
     hostname            = var.hostname
@@ -30,31 +51,77 @@ resource "libvirt_cloudinit_disk" "init" {
   })
 }
 
+resource "libvirt_volume" "cloudinit" {
+  name = "${var.name}-cloudinit.iso"
+  pool = var.pool_name
+
+  create = {
+    content = {
+      url = libvirt_cloudinit_disk.init.path
+    }
+  }
+}
+
 resource "libvirt_domain" "vm" {
-  name   = var.name
-  memory = var.memory_mb
-  vcpu   = var.vcpu_count
+  name        = var.name
+  type        = "kvm"
+  memory      = var.memory_mb
+  memory_unit = "MiB"
+  vcpu        = var.vcpu_count
 
-  cloudinit = libvirt_cloudinit_disk.init.id
-
-  disk {
-    volume_id = libvirt_volume.disk.id
+  os = {
+    type = "hvm"
   }
 
-  network_interface {
-    network_name   = var.network_name
-    wait_for_lease = true
-  }
+  devices = {
+    disks = [
+      {
+        device = "disk"
+        target = { dev = "vda", bus = "virtio" }
+        source = {
+          volume = {
+            pool   = libvirt_volume.disk.pool
+            volume = libvirt_volume.disk.name
+          }
+        }
+        driver = {
+          name  = "qemu"
+          type  = "qcow2"
+          cache = "none"
+        }
+      },
+      {
+        device = "cdrom"
+        target = { dev = "hda", bus = "ide" }
+        source = {
+          volume = {
+            pool   = libvirt_volume.cloudinit.pool
+            volume = libvirt_volume.cloudinit.name
+          }
+        }
+      }
+    ]
 
-  console {
-    type        = "pty"
-    target_port = "0"
-    target_type = "serial"
+    interfaces = [
+      {
+        source = {
+          network = {
+            network = var.network_name
+          }
+        }
+        model = {
+          type = "virtio"
+        }
+        wait_for_ip = {
+          timeout = 300
+          source  = "lease"
+        }
+      }
+    ]
   }
+}
 
-  graphics {
-    type        = "spice"
-    listen_type = "address"
-    autoport    = true
-  }
+data "libvirt_domain_interface_addresses" "vm" {
+  domain = libvirt_domain.vm.uuid
+  source = "lease"
 }
