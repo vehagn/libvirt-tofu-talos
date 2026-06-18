@@ -4,6 +4,7 @@ set dotenv-load
 
 mod ansible "ansible/justfile"
 mod tofu "tofu/justfile"
+mod flux "flux/justfile"
 
 # List available recipes
 default:
@@ -42,17 +43,17 @@ configure:
     just tofu ubuntu configure
     just tofu talos configure
 
-# Install ansible, opentofu, qemu-img, jq, and envsubst (macOS via Homebrew, Debian/Ubuntu via apt)
+# Install all dependencies (macOS via Homebrew, Debian/Ubuntu via apt)
 install-deps:
     #!/usr/bin/env bash
     set -euo pipefail
     case "$(uname -s)" in
         Darwin)
-            brew install ansible opentofu gettext qemu jq
+            brew install ansible opentofu gettext qemu jq gh fluxcd/tap/flux
             ;;
         Linux)
             if [[ ! -f /etc/debian_version ]]; then
-                echo "Unsupported Linux distro — install ansible and opentofu manually." >&2
+                echo "Unsupported Linux distro — install dependencies manually." >&2
                 exit 1
             fi
             # Ansible + qemu-img (tofu/talos image conversion) + jq (node IP discovery)
@@ -69,6 +70,20 @@ install-deps:
                 | sudo tee /etc/apt/sources.list.d/opentofu.list > /dev/null
             sudo apt-get update -qq
             sudo apt-get install -y opentofu
+
+            # GitHub CLI via official apt repo
+            sudo install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+                | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+            sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+            printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
+                "$(dpkg --print-architecture)" \
+                | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y gh
+
+            # Flux CLI via official install script
+            curl -s https://fluxcd.io/install.sh | sudo bash
             ;;
         *)
             echo "Unsupported OS: $(uname -s)" >&2
