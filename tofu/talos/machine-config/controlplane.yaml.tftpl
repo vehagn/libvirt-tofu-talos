@@ -49,6 +49,9 @@ cluster:
               mode: kubernetes
             sysctlfix:
               enabled: false
+            bpf:
+              vlanBypass:
+                - 0
             securityContext:
               capabilities:
                 ciliumAgent:

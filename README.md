@@ -85,6 +85,7 @@ Talos requires two non-default Cilium settings that are encoded in both the boot
 | `sysctlfix.enabled`                             | `false`                                | Talos has an immutable root filesystem — `/etc/sysctl.d/` does not exist                                         |
 | `securityContext.capabilities.ciliumAgent`      | explicit list                          | Talos's container runtime (containerd) requires capabilities to be enumerated; it will not grant them implicitly |
 | `securityContext.capabilities.cleanCiliumState` | `[NET_ADMIN, SYS_ADMIN, SYS_RESOURCE]` | Same reason as above                                                                                             |
+| `bpf.vlanBypass`                                | `[0]`                                  | The KVM `br0` bridge (trunk port) forwards VLAN-tagged Unifi ARP broadcasts to VM `eth0`; Cilium drops those frames by default, preventing the upstream router from refreshing its ARP entry for cluster IPs |
 
 kube-proxy is disabled in the Talos machine config (`cluster.proxy.disabled: true`) so that
 Cilium's kube-proxy replacement is the sole owner of service routing.
@@ -96,6 +97,18 @@ container is failing with `just tofu talos talosctl dashboard` or:
 just tofu talos kubectl -n kube-system logs <cilium-pod> -c apply-sysctl-overwrites
 just tofu talos kubectl -n kube-system logs <cilium-pod> -c clean-cilium-state
 ```
+
+## VIP / DHCP conflict
+
+The cluster VIP (`TALOS_VIP` in `setup.env`) must be **outside your DHCP pool**. If another VM on the
+same bridge gets DHCP-assigned the same IP as the VIP, both will respond to ARP and every other
+packet will be routed to the wrong host — producing intermittent "connection refused" errors when
+connecting via the VIP.
+
+Symptoms: `arping -c 3 -I br0 <VIP>` from the hypervisor returns replies from **two different MACs**.
+
+Fix: either reserve the VIP in your DHCP server, or stop any VM that holds the conflicting IP.
+`just tofu ubuntu destroy` tears down the Ubuntu PoC if it happens to own the address.
 
 ## Rolling OS upgrades
 

@@ -26,6 +26,13 @@ spec:
     # Talos has an immutable root filesystem — /etc/sysctl.d/ does not exist.
     sysctlfix:
       enabled: false
+    # Allow VLAN-tagged frames through the BPF host hook. The KVM bridge
+    # (br0 on a trunk port) forwards VLAN-tagged broadcast traffic from the
+    # Unifi switch (e.g. ARP requests) to VM eth0. Without this bypass,
+    # Cilium drops those frames and the upstream router cannot refresh its
+    # ARP entry for cluster IPs including the VIP.
+    bpf:
+      vlanBypass: [0]
     # Talos's container runtime does not grant capabilities unless explicitly listed.
     securityContext:
       capabilities:

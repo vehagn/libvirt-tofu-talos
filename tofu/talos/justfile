@@ -56,7 +56,28 @@ talosctl *args:
 
 # Run kubectl against the cluster using the generated kubeconfig
 kubectl *args:
-    @kubectl --kubeconfig output/kubeconfig {{ args }}
+    #!/usr/bin/env bash
+    if kubectl --kubeconfig output/kubeconfig {{ args }}; then
+        exit 0
+    fi
+    rc=$?
+    vip="${TALOS_VIP:-}"
+    printf '\n--- kubectl failed; diagnostics ---\n' >&2
+    if [[ -n "$vip" ]]; then
+        printf '  VIP %s ICMP:     ' "$vip" >&2
+        timeout 2 ping -c1 "$vip" &>/dev/null && printf 'reachable\n' >&2 || printf 'unreachable\n' >&2
+        printf '  VIP %s TCP 6443: ' "$vip" >&2
+        nc -4 -zw3 "$vip" 6443 2>/dev/null && printf 'open\n' >&2 || printf 'closed/filtered\n' >&2
+    fi
+    printf '  Talos node health (direct IPs):\n' >&2
+    talosctl --talosconfig output/talosconfig get members -o table 2>&1 | sed 's/^/    /' >&2 || true
+    if [[ -n "$vip" ]]; then
+        printf '  VIP holder:\n' >&2
+        talosctl --talosconfig output/talosconfig get addresses 2>&1 \
+            | grep -E "(NODE|$(printf '%s' "$vip" | sed 's/\./\\./g'))" \
+            | sed 's/^/    /' >&2 || true
+    fi
+    exit $rc
 
 # Open a serial console to a Talos node (Ctrl+] to exit)
 console node:
