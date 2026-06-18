@@ -16,7 +16,12 @@ setup:
     read -rp "Hypervisor host (IP or hostname): " host
     read -rp "Hypervisor user [root]: " user
     user="${user:-root}"
-    printf 'HYPERVISOR_HOST=%s\nHYPERVISOR_USER=%s\n' "$host" "$user" > setup.env
+    read -rp "VM bridge interface [br0]: " bridge
+    bridge="${bridge:-br0}"
+    read -rp "VM console password [ubuntu]: " password
+    password="${password:-ubuntu}"
+    printf 'HYPERVISOR_HOST=%s\nHYPERVISOR_USER=%s\nVM_BRIDGE_INTERFACE=%s\nVM_USER_PASSWORD=%s\n' \
+        "$host" "$user" "$bridge" "$password" > setup.env
     echo "Created setup.env — run 'just configure' to generate config files"
 
 # Generate ansible/inventory.local.yaml and tofu/ubuntu/terraform.tfvars from setup.env
@@ -40,9 +45,18 @@ configure:
     while IFS= read -r key; do
         [[ -n "$key" ]] && keys_hcl+="  \"${key}\","$'\n'
     done <<< "$ssh_keys"
+    bridge="${VM_BRIDGE_INTERFACE:-br0}"
     {
         printf 'libvirt_uri = "qemu+ssh://%s@%s/system"\n\n' "$HYPERVISOR_USER" "$HYPERVISOR_HOST"
         printf 'ssh_authorized_keys = [\n%s]\n\n' "$keys_hcl"
+        if [[ "$bridge" == "null" ]]; then
+            printf 'vm_bridge_interface = null  # private NAT network\n\n'
+        else
+            printf 'vm_bridge_interface = "%s"\n\n' "$bridge"
+        fi
+        if [[ -n "${VM_USER_PASSWORD:-}" ]]; then
+            printf 'vm_user_password = "%s"\n\n' "$VM_USER_PASSWORD"
+        fi
         printf '# Optional overrides (defaults shown)\n'
         printf '# vm_name         = "ubuntu"\n'
         printf '# vm_memory_mb    = 2048\n'

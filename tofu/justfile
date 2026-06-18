@@ -1,4 +1,7 @@
 set shell := ["bash", "-c"]
+set dotenv-path := "../setup.env"
+set dotenv-load
+set dotenv-required := false
 
 mod ubuntu "ubuntu/justfile"
 

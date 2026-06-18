@@ -5,8 +5,16 @@ ssh_authorized_keys = [
   "ssh-ed25519 AAAA...",
 ]
 
+# Bridge interface the VM joins (must exist on the hypervisor; configured by `just ansible bootstrap`)
+vm_bridge_interface = "${VM_BRIDGE_INTERFACE}"
+
 # Optional overrides (defaults shown)
-# vm_name         = "ubuntu"
-# vm_memory_mb    = 2048
-# vm_vcpu_count   = 2
-# vm_disk_size_gb = 20
+# vm_name             = "ubuntu"
+# vm_memory_mb        = 2048
+# vm_vcpu_count       = 2
+# vm_disk_size_gb     = 20
+# vm_bridge_interface = null           # set to null to use a private NAT network instead
+# vm_user_password    = "ubuntu"       # enables console password login; omit to disable
+# vm_static_ip        = "192.168.1.100/24"  # omit for DHCP
+# vm_gateway          = "192.168.1.1"
+# vm_dns_servers      = ["1.1.1.1", "8.8.8.8"]

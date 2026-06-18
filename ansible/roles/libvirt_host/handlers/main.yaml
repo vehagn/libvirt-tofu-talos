@@ -1,3 +1,13 @@
 ---
 - name: Reset connection
   ansible.builtin.meta: reset_connection
+
+- name: Restart libvirtd
+  ansible.builtin.service:
+    name: "{{ libvirt_service }}"
+    state: restarted
+
+- name: Restart NetworkManager
+  ansible.builtin.service:
+    name: NetworkManager
+    state: restarted

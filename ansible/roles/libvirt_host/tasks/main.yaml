@@ -17,3 +17,85 @@
     groups: libvirt
     append: true
   notify: Reset connection
+
+# Run VMs as root for bridge access; security_driver=none disables AppArmor/SELinux confinement (inactive on Debian 13).
+- name: Configure QEMU security and user settings
+  ansible.builtin.lineinfile:
+    path: /etc/libvirt/qemu.conf
+    regexp: "^#?\\s*{{ item.key }}\\s*="
+    line: '{{ item.key }} = "{{ item.value }}"'
+  loop:
+    - { key: user, value: root }
+    - { key: group, value: root }
+    - { key: security_driver, value: none }
+  notify: Restart libvirtd
+
+- name: Flush handlers to restart libvirtd immediately
+  ansible.builtin.meta: flush_handlers
+
+- name: Configure host bridge for VM networking
+  when: libvirt_bridge_configure
+  block:
+    - name: Enable NetworkManager to manage ifupdown interfaces
+      ansible.builtin.copy:
+        dest: /etc/NetworkManager/conf.d/10-managed.conf
+        content: |
+          [ifupdown]
+          managed=true
+        mode: "0644"
+      notify: Restart NetworkManager
+
+    - name: Remove physical interface from /etc/network/interfaces
+      ansible.builtin.replace:
+        path: /etc/network/interfaces
+        regexp: "^(allow-hotplug|auto|iface)\\s+{{ ansible_facts['default_ipv4']['interface'] }}(\\s.*)?$"
+        replace: "#\\g<0>"
+      notify: Restart NetworkManager
+
+    - name: Flush handlers to restart NetworkManager before configuring bridge
+      ansible.builtin.meta: flush_handlers
+
+    - name: Check if bridge connection exists
+      ansible.builtin.command: nmcli connection show "{{ libvirt_bridge_name }}"
+      register: bridge_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Create bridge connection with DHCP
+      ansible.builtin.command: >
+        nmcli connection add
+        type bridge
+        con-name "{{ libvirt_bridge_name }}"
+        ifname "{{ libvirt_bridge_name }}"
+        bridge.mac-address "{{ ansible_facts['default_ipv4']['macaddress'] }}"
+        ipv4.method auto
+        ipv6.method ignore
+        connection.autoconnect yes
+      when: bridge_exists.rc != 0
+
+    - name: Check if bridge slave connection exists
+      ansible.builtin.command: nmcli connection show "{{ libvirt_bridge_name }}-slave"
+      register: slave_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Add physical interface as bridge member
+      ansible.builtin.command: >
+        nmcli connection add
+        type ethernet
+        slave-type bridge
+        con-name "{{ libvirt_bridge_name }}-slave"
+        ifname "{{ ansible_facts['default_ipv4']['interface'] }}"
+        master "{{ libvirt_bridge_name }}"
+        connection.autoconnect yes
+      when: slave_exists.rc != 0
+
+    - name: Check if bridge connection is active
+      ansible.builtin.command: nmcli connection show --active "{{ libvirt_bridge_name }}"
+      register: bridge_active
+      failed_when: false
+      changed_when: false
+
+    - name: Bring bridge up
+      ansible.builtin.command: nmcli connection up "{{ libvirt_bridge_name }}"
+      when: bridge_active.stdout == ""

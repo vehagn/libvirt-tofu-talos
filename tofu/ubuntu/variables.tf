@@ -31,3 +31,34 @@ variable "vm_disk_size_gb" {
   type        = number
   default     = 20
 }
+
+variable "vm_bridge_interface" {
+  description = "Host bridge interface for the VM (same subnet as host). Set to null to use a private NAT network instead."
+  type        = string
+  default     = "br0"
+}
+
+variable "vm_user_password" {
+  description = "Password for the default ubuntu user. If null, password login is disabled."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "vm_static_ip" {
+  description = "Static IP for the VM in CIDR notation (e.g. 192.168.1.100/24). If null, DHCP is used."
+  type        = string
+  default     = null
+}
+
+variable "vm_gateway" {
+  description = "Default gateway IP. Used when vm_static_ip is set."
+  type        = string
+  default     = null
+}
+
+variable "vm_dns_servers" {
+  description = "DNS server IPs. Used when vm_static_ip is set."
+  type        = list(string)
+  default     = ["1.1.1.1", "8.8.8.8"]
+}

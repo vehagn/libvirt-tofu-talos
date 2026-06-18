@@ -1,0 +1,17 @@
+version: 2
+ethernets:
+  primary:
+    match:
+      name: "en*"
+    addresses:
+      - ${static_ip}
+%{ if gateway != null ~}
+    routes:
+      - to: default
+        via: ${gateway}
+%{ endif ~}
+    nameservers:
+      addresses:
+%{ for dns in dns_servers ~}
+        - ${dns}
+%{ endfor ~}

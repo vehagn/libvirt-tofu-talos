@@ -18,6 +18,8 @@ resource "libvirt_pool" "main" {
 }
 
 resource "libvirt_network" "main" {
+  count = var.vm_bridge_interface == null ? 1 : 0
+
   name      = "tofu-net"
   autostart = true
 
@@ -50,8 +52,14 @@ module "ubuntu" {
   vcpu_count        = var.vm_vcpu_count
   disk_size_gb      = var.vm_disk_size_gb
   pool_name         = libvirt_pool.main.name
-  network_name      = libvirt_network.main.name
+  network_name      = var.vm_bridge_interface == null ? libvirt_network.main[0].name : null
+  network_bridge    = var.vm_bridge_interface
   base_image_source = local.ubuntu_noble_cloud_image
 
   ssh_authorized_keys = var.ssh_authorized_keys
+  user_password       = var.vm_user_password
+
+  static_ip   = var.vm_static_ip
+  gateway     = var.vm_gateway
+  dns_servers = var.vm_dns_servers
 }

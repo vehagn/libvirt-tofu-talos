@@ -4,9 +4,13 @@ libvirt_packages:
   - libvirt-daemon-system
   - libvirt-clients
   - bridge-utils
+  - network-manager
   - virtinst
   - python3-libvirt
   - cpu-checker
 
 libvirt_service: libvirtd
 libvirt_user: "{{ ansible_user }}"
+
+libvirt_bridge_name: br0
+libvirt_bridge_configure: true

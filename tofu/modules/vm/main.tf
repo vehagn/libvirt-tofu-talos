@@ -1,7 +1,7 @@
-# Base cloud image — downloaded once per pool, used as a shared backing store
-resource "libvirt_volume" "base" {
-  name = "${var.name}-base.qcow2"
-  pool = var.pool_name
+resource "libvirt_volume" "disk" {
+  name          = "${var.name}.qcow2"
+  pool          = var.pool_name
+  capacity      = var.disk_size_gb * 1024 * 1024 * 1024
 
   target = {
     format = {
@@ -16,39 +16,25 @@ resource "libvirt_volume" "base" {
   }
 }
 
-# Per-VM overlay disk — only stores deltas from the base image
-resource "libvirt_volume" "disk" {
-  name          = "${var.name}.qcow2"
-  pool          = var.pool_name
-  capacity      = var.disk_size_gb
-  capacity_unit = "GiB"
-
-  target = {
-    format = {
-      type = "qcow2"
-    }
-  }
-
-  backing_store = {
-    path = libvirt_volume.base.path
-    format = {
-      type = "qcow2"
-    }
-  }
-}
-
 resource "libvirt_cloudinit_disk" "init" {
   name = "${var.name}-cloudinit.iso"
 
   user_data = templatefile("${path.module}/templates/user-data.tftpl", {
     hostname            = var.hostname
     ssh_authorized_keys = var.ssh_authorized_keys
+    user_password       = var.user_password
   })
 
   meta_data = templatefile("${path.module}/templates/meta-data.tftpl", {
     instance_id = var.name
     hostname    = var.hostname
   })
+
+  network_config = var.static_ip != null ? templatefile("${path.module}/templates/network-config.tftpl", {
+    static_ip   = var.static_ip
+    gateway     = var.gateway
+    dns_servers = var.dns_servers
+  }) : null
 }
 
 resource "libvirt_volume" "cloudinit" {
@@ -68,6 +54,7 @@ resource "libvirt_domain" "vm" {
   memory      = var.memory_mb
   memory_unit = "MiB"
   vcpu        = var.vcpu_count
+  running     = true
 
   os = {
     type = "hvm"
@@ -102,26 +89,57 @@ resource "libvirt_domain" "vm" {
       }
     ]
 
+    serials = [
+      {
+        target = {
+          type = "isa-serial"
+          port = 0
+        }
+      }
+    ]
+
+    consoles = [
+      {
+        target = {
+          type = "serial"
+          port = 0
+        }
+      }
+    ]
+
+    channels = [
+      {
+        source = {
+          unix = {}
+        }
+        target = {
+          virt_io = {
+            name = "org.qemu.guest_agent.0"
+          }
+        }
+      }
+    ]
+
     interfaces = [
       {
         source = {
-          network = {
-            network = var.network_name
-          }
+          bridge  = var.network_bridge != null ? { bridge = var.network_bridge } : null
+          network = var.network_name != null ? { network = var.network_name } : null
         }
         model = {
           type = "virtio"
         }
-        wait_for_ip = {
+        wait_for_ip = var.static_ip == null ? {
           timeout = 300
-          source  = "lease"
-        }
+          source  = var.network_bridge != null ? "agent" : "lease"
+        } : null
       }
     ]
   }
 }
 
 data "libvirt_domain_interface_addresses" "vm" {
+  count  = var.static_ip == null ? 1 : 0
   domain = libvirt_domain.vm.uuid
-  source = "lease"
+  source = var.network_bridge != null ? "agent" : "lease"
 }

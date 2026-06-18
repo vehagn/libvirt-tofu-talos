@@ -1,4 +1,7 @@
 set shell := ["zsh", "-lc"]
+set dotenv-path := "../setup.env"
+set dotenv-load
+set dotenv-required := false
 
 ansible_inventory := env_var_or_default("ANSIBLE_INVENTORY", "inventory.local.yaml")
 
@@ -8,12 +11,8 @@ default:
 
 # Generate inventory.local.yaml from setup.env (HYPERVISOR_HOST, HYPERVISOR_USER)
 configure:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    ROOT="$(git rev-parse --show-toplevel)"
-    [[ -f "$ROOT/setup.env" ]] && source "$ROOT/setup.env"
     envsubst '${HYPERVISOR_HOST} ${HYPERVISOR_USER}' < inventory.yaml > inventory.local.yaml
-    echo "Created inventory.local.yaml"
+    @echo "Created inventory.local.yaml"
 
 # Bootstrap the hypervisor with Ansible (pass extra args e.g. --check for dry run)
 bootstrap *args:
