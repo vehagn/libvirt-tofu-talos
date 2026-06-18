@@ -14,9 +14,11 @@ just ansible bootstrap  # apply (add --check for a dry run)
 Applies two roles to the `hypervisors` group:
 
 ### `common`
+
 Installs system utilities. Add packages to `roles/common/defaults/main.yaml`.
 
 ### `libvirt_host`
+
 1. Installs QEMU and libvirt packages
 2. Enables and starts `libvirtd`
 3. Adds the target user to the `libvirt` group

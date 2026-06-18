@@ -1,6 +1,7 @@
 # OpenTofu — VM Management
 
-Manages VMs on the libvirt hypervisor via the [`dmacvicar/libvirt`](https://registry.terraform.io/providers/dmacvicar/libvirt/latest/docs) provider.
+Manages VMs on the libvirt hypervisor via the [
+`dmacvicar/libvirt`](https://registry.terraform.io/providers/dmacvicar/libvirt/latest/docs) provider.
 
 ## Usage
 
@@ -15,7 +16,8 @@ just tofu ubuntu destroy
 
 ## Module: `modules/vm`
 
-Creates a single VM from a cloud image with cloud-init first-boot configuration. The base image is downloaded once; per-VM disks only store deltas (qcow2 copy-on-write).
+Creates a single VM from a cloud image with cloud-init first-boot configuration. The base image is downloaded once;
+per-VM disks only store deltas (qcow2 copy-on-write).
 
 | Variable              | Default | Description                          |
 |-----------------------|---------|--------------------------------------|
@@ -29,7 +31,9 @@ Creates a single VM from a cloud image with cloud-init first-boot configuration.
 
 ## Provider conventions
 
-Every module (not just root modules) must declare provider dependencies in a `versions.tf` with a `required_providers` block. OpenTofu does not inherit provider source from the root module — omitting it causes it to look up `hashicorp/libvirt`, which doesn't exist.
+Every module (not just root modules) must declare provider dependencies in a `versions.tf` with a `required_providers`
+block. OpenTofu does not inherit provider source from the root module — omitting it causes it to look up
+`hashicorp/libvirt`, which doesn't exist.
 
 ## Adding an environment
 
@@ -40,7 +44,8 @@ Every module (not just root modules) must declare provider dependencies in a `ve
 
 ## State
 
-State is stored locally (`.tfstate`) by default. Configure a remote backend in `versions.tf` for shared or production environments.
+State is stored locally (`.tfstate`) by default. Configure a remote backend in `versions.tf` for shared or production
+environments.
 
 ## Structure
 

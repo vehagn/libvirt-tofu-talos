@@ -1,5 +1,5 @@
 locals {
-  ubuntu_noble_cloud_image = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+  ubuntu_resolute_cloud_image = "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img"
 }
 
 resource "libvirt_pool" "main" {
@@ -54,7 +54,7 @@ module "ubuntu" {
   pool_name         = libvirt_pool.main.name
   network_name      = var.vm_bridge_interface == null ? libvirt_network.main[0].name : null
   network_bridge    = var.vm_bridge_interface
-  base_image_source = local.ubuntu_noble_cloud_image
+  base_image_source = local.ubuntu_resolute_cloud_image
 
   ssh_authorized_keys = var.ssh_authorized_keys
   user_password       = var.vm_user_password
