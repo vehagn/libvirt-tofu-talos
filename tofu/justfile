@@ -4,6 +4,7 @@ set dotenv-load
 set dotenv-required := false
 
 mod ubuntu "ubuntu/justfile"
+mod talos "talos/justfile"
 
 [private]
 default:

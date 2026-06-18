@@ -1,0 +1,30 @@
+libvirt_uri = "qemu+ssh://${HYPERVISOR_USER}@${HYPERVISOR_HOST}/system"
+
+vm_bridge_interface = "${VM_BRIDGE_INTERFACE}"
+
+image = {
+  version = "v1.12.0"
+  # update_version = "v1.12.1"  # set to roll the cluster to a newer OS
+}
+
+cluster = {
+  name = "talos"
+  # Cluster endpoint VIP. Must be a free address on the bridge subnet, outside
+  # the DHCP range; nodes themselves use DHCP.
+  vip                = "192.168.1.99"
+  kubernetes_version = "v1.32.0"
+}
+
+# All nodes act as both control plane and worker.
+# mac_address is optional — set it only if you want DHCP reservations.
+nodes = {
+  "talos-00" = {}
+  "talos-01" = {}
+  "talos-02" = {}
+}
+
+# Optional overrides (defaults shown)
+# node_vcpu         = 4
+# node_memory_mb    = 6144
+# node_os_disk_gb   = 12
+# node_data_disk_gb = 24

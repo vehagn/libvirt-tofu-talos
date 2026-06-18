@@ -12,6 +12,12 @@ just tofu ubuntu apply
 just tofu ubuntu ssh        # SSH into the VM
 just tofu ubuntu console    # serial console via hypervisor (exit with Ctrl+])
 just tofu ubuntu destroy
+
+# Talos cluster (3 nodes, control plane + workload on each)
+just tofu talos init
+just tofu talos apply
+just tofu talos kubectl get nodes
+just tofu talos upgrade     # rolling OS upgrade (after bumping image.version)
 ```
 
 ## Module: `modules/vm`
@@ -66,4 +72,57 @@ ubuntu/                         Ubuntu 24.04 LTS environment
   variables.tf
   outputs.tf                    vm_ip, vm_name, ssh_command
   terraform.tfvars.example      Copy to terraform.tfvars and edit (or use `just configure`)
+
+talos/                          Talos Linux cluster (3 control-plane + workload nodes)
+  main.tf                       Pool, image factory + download, talos base volume
+  nodes.tf                      Per-node libvirt domain, OS/data disks, cidata
+  talos.tf                      Secrets, machine config, talos_machine, talos_cluster
+  outputs.tf                    Writes output/{talosconfig,kubeconfig}
+  image/schematic.yaml          Image factory schematic (qemu-guest-agent)
+  machine-config/               Machine config patch templates
 ```
+
+## Talos cluster (`talos/`)
+
+Three nodes act as both control plane and worker (4 vCPU / 6 GiB RAM / 12 GiB OS + 24 GiB data by default — override
+per node via the `nodes` map or globally via `node_*` vars).
+
+### Image preparation
+
+The Talos `nocloud` raw image is fetched from [image.factory.talos.dev](https://image.factory.talos.dev) based on a
+schematic that includes `siderolabs/qemu-guest-agent`. Before upload the raw file is converted to a sparse qcow2 with
+`qemu-img convert -f raw -O qcow2`; this reduces upload size from ~1 GiB to ~100 MiB. Each node's OS disk is a
+thin copy-on-write overlay on top of the shared base volume.
+
+### First boot
+
+Machine config is delivered via a cidata ISO attached as a CD-ROM. The ISO's `meta_data` contains only
+`instance-id`; no `local-hostname` is set there (setting it caused Talos to synthesise a duplicate `HostnameConfig`
+document that conflicted with the one injected via `config_patches`).
+
+### Hostname
+
+Talos v1.12 rejects `machine.network.hostname` (v1alpha1) when a `HostnameConfig` document is also present. Hostname
+is therefore set exclusively via a separate `HostnameConfig` patch (`machine-config/hostname.yaml.tftpl`), with
+`auto: off` to prevent DHCP from overwriting it.
+
+### IP discovery
+
+Nodes get their primary address from **DHCP**. After a domain starts, `data.external.node_ip` polls
+`virsh domifaddr --source agent` over SSH (up to 60 × 5 s) until an IPv4 appears on a physical NIC
+(`eth*/enp*/ens*`), excluding the VIP. The QEMU guest agent (baked into the image schematic) is what makes virsh
+aware of the guest-side addresses. The discovered IPs are passed to `talos_machine` and `talos_cluster`.
+
+### VIP vs. bootstrap endpoint
+
+The **VIP** (`cluster.vip`) is the long-term Kubernetes API endpoint — it is elected by Talos and only becomes
+active once etcd is healthy. `talos_cluster` (which bootstraps etcd) must therefore connect to a real node IP, not
+the VIP. `talos_cluster.node` and `talos_cluster.endpoint` are set to `local.first_control_plane`; the VIP appears
+only in the machine config's `cluster_endpoint` so that kubeconfig and post-bootstrap tooling use it.
+
+### Graceful OS upgrades
+
+Uses `terraform-provider-talos` v0.12.0-alpha.4's new `talos_machine` resource. Bump `image.version` and run
+`just tofu talos upgrade` (`-parallelism=1`) to roll upgrades sequentially and preserve etcd quorum.
+`drain_on_upgrade` is off on the first apply (no `output/kubeconfig` yet) and switches on automatically for all
+subsequent applies — see the `bootstrap_kubeconfig` local in `talos.tf`.

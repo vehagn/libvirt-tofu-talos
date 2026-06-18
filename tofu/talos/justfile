@@ -1,0 +1,63 @@
+set shell := ["zsh", "-lc"]
+set dotenv-path := "../../setup.env"
+set dotenv-load
+set dotenv-required := false
+
+[private]
+default:
+    @just --list
+
+# Generate terraform.tfvars from setup.env
+configure:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bridge="${VM_BRIDGE_INTERFACE:-br0}"
+    vip="${TALOS_VIP:-192.168.1.99}"
+    {
+        printf 'libvirt_uri = "qemu+ssh://%s@%s/system"\n\n' "$HYPERVISOR_USER" "$HYPERVISOR_HOST"
+        printf 'vm_bridge_interface = "%s"\n\n' "$bridge"
+        printf 'image = {\n  version = "v1.12.0"\n}\n\n'
+        printf 'cluster = {\n'
+        printf '  name               = "talos"\n'
+        printf '  vip                = "%s"\n' "$vip"
+        printf '  kubernetes_version = "v1.32.0"\n'
+        printf '}\n\n'
+        printf 'nodes = {\n'
+        printf '  "talos-00" = {}\n'
+        printf '  "talos-01" = {}\n'
+        printf '  "talos-02" = {}\n'
+        printf '}\n'
+    } > terraform.tfvars
+    echo "Created terraform.tfvars (3 nodes via DHCP, vip ${vip})"
+
+# Initialise OpenTofu providers and modules
+init:
+    tofu init
+
+# Preview changes without applying
+plan:
+    tofu plan
+
+# Bootstrap the cluster (or apply config drift)
+apply:
+    tofu apply
+
+# Roll OS upgrades sequentially (bump image.version in terraform.tfvars first)
+upgrade:
+    tofu apply -parallelism=1
+
+# Destroy all managed resources
+destroy:
+    tofu destroy
+
+# Run talosctl against the cluster using the generated talosconfig
+talosctl *args:
+    @talosctl --talosconfig output/talosconfig {{ args }}
+
+# Run kubectl against the cluster using the generated kubeconfig
+kubectl *args:
+    @kubectl --kubeconfig output/kubeconfig {{ args }}
+
+# Open a serial console to a Talos node (Ctrl+] to exit)
+console node:
+    @ssh -t "${HYPERVISOR_USER}@${HYPERVISOR_HOST}" "virsh console talos-{{ node }}"

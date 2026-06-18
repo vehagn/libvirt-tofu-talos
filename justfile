@@ -20,67 +20,44 @@ setup:
     bridge="${bridge:-br0}"
     read -rp "VM console password [ubuntu]: " password
     password="${password:-ubuntu}"
-    printf 'HYPERVISOR_HOST=%s\nHYPERVISOR_USER=%s\nVM_BRIDGE_INTERFACE=%s\nVM_USER_PASSWORD=%s\n' \
-        "$host" "$user" "$bridge" "$password" > setup.env
+    read -rp "Talos cluster VIP [192.168.1.99]: " vip
+    vip="${vip:-192.168.1.99}"
+    {
+        printf 'HYPERVISOR_HOST=%s\n' "$host"
+        printf 'HYPERVISOR_USER=%s\n' "$user"
+        printf 'VM_BRIDGE_INTERFACE=%s\n' "$bridge"
+        printf 'VM_USER_PASSWORD=%s\n' "$password"
+        printf '\n'
+        printf '# Talos cluster (used by tofu/talos). Nodes use DHCP; VIP is the cluster endpoint.\n'
+        printf 'TALOS_VIP=%s\n' "$vip"
+    } > setup.env
     echo "Created setup.env — run 'just configure' to generate config files"
 
-# Generate ansible/inventory.local.yaml and tofu/ubuntu/terraform.tfvars from setup.env
+# Generate ansible/inventory.local.yaml and tofu/*/terraform.tfvars from setup.env
 configure:
     #!/usr/bin/env bash
     set -euo pipefail
     envsubst '${HYPERVISOR_HOST} ${HYPERVISOR_USER}' < ansible/inventory.yaml > ansible/inventory.local.yaml
     echo "Created ansible/inventory.local.yaml"
-    ssh_keys=$(ssh-add -L 2>/dev/null || true)
-    if [[ -z "$ssh_keys" ]]; then
-        for f in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub ~/.ssh/id_ecdsa.pub; do
-            [[ -f "$f" ]] && ssh_keys+="$(cat "$f")"$'\n'
-        done
-        ssh_keys="${ssh_keys%$'\n'}"
-    fi
-    if [[ -z "$ssh_keys" ]]; then
-        echo "Error: no SSH keys found — load keys with ssh-add, or place a public key in ~/.ssh/*.pub" >&2
-        exit 1
-    fi
-    keys_hcl=""
-    while IFS= read -r key; do
-        [[ -n "$key" ]] && keys_hcl+="  \"${key}\","$'\n'
-    done <<< "$ssh_keys"
-    bridge="${VM_BRIDGE_INTERFACE:-br0}"
-    {
-        printf 'libvirt_uri = "qemu+ssh://%s@%s/system"\n\n' "$HYPERVISOR_USER" "$HYPERVISOR_HOST"
-        printf 'ssh_authorized_keys = [\n%s]\n\n' "$keys_hcl"
-        if [[ "$bridge" == "null" ]]; then
-            printf 'vm_bridge_interface = null  # private NAT network\n\n'
-        else
-            printf 'vm_bridge_interface = "%s"\n\n' "$bridge"
-        fi
-        if [[ -n "${VM_USER_PASSWORD:-}" ]]; then
-            printf 'vm_user_password = "%s"\n\n' "$VM_USER_PASSWORD"
-        fi
-        printf '# Optional overrides (defaults shown)\n'
-        printf '# vm_name         = "ubuntu"\n'
-        printf '# vm_memory_mb    = 2048\n'
-        printf '# vm_vcpu_count   = 2\n'
-        printf '# vm_disk_size_gb = 20\n'
-    } > tofu/ubuntu/terraform.tfvars
-    echo "Created tofu/ubuntu/terraform.tfvars ($(echo "$ssh_keys" | grep -c .) SSH key(s))"
+    just tofu ubuntu configure
+    just tofu talos configure
 
-# Install ansible, opentofu, and envsubst (macOS via Homebrew, Debian/Ubuntu via apt)
+# Install ansible, opentofu, qemu-img, jq, and envsubst (macOS via Homebrew, Debian/Ubuntu via apt)
 install-deps:
     #!/usr/bin/env bash
     set -euo pipefail
     case "$(uname -s)" in
         Darwin)
-            brew install ansible opentofu gettext
+            brew install ansible opentofu gettext qemu jq
             ;;
         Linux)
             if [[ ! -f /etc/debian_version ]]; then
                 echo "Unsupported Linux distro — install ansible and opentofu manually." >&2
                 exit 1
             fi
-            # Ansible
+            # Ansible + qemu-img (tofu/talos image conversion) + jq (node IP discovery)
             sudo apt-get update -qq
-            sudo apt-get install -y ansible gettext-base
+            sudo apt-get install -y ansible gettext-base qemu-utils jq
 
             # OpenTofu via official apt repo
             sudo install -m 0755 -d /etc/apt/keyrings

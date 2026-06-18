@@ -47,6 +47,10 @@ terraform.rc
 # Local hypervisor config
 setup.env
 
+# Talos environment artefacts
+tofu/talos/output/
+tofu/talos/.images/
+
 # Ansible
 *.retry
 ansible/inventory.local.yaml

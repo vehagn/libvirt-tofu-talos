@@ -11,11 +11,12 @@ Two-layer infrastructure stack: Ansible bootstraps the KVM hypervisor, OpenTofu 
 
 ## Workflow
 
-1. Run `just setup` to create `setup.env` with your hypervisor host and user
-2. Run `just configure` to generate `ansible/inventory.local.yaml` and `tofu/ubuntu/terraform.tfvars` (SSH keys fetched
-   from agent or `~/.ssh/*.pub`)
+1. Run `just setup` to create `setup.env` with your hypervisor host, user, and Talos network
+2. Run `just configure` to generate `ansible/inventory.local.yaml`, `tofu/ubuntu/terraform.tfvars`, and
+   `tofu/talos/terraform.tfvars` (SSH keys fetched from agent or `~/.ssh/*.pub`)
 3. Bootstrap the host: `just ansible bootstrap`
-4. Provision the VM: `just tofu ubuntu apply`
+4. Provision an Ubuntu VM: `just tofu ubuntu apply`
+5. Or bootstrap a Talos cluster: `just tofu talos apply`
 
 ## Conventions
 
@@ -27,7 +28,7 @@ Two-layer infrastructure stack: Ansible bootstraps the KVM hypervisor, OpenTofu 
 ## Roadmap
 
 - [x] Ubuntu 24.04 LTS PoC (`tofu/ubuntu/`)
-- [ ] Talos Linux cluster (`tofu/talos/`)
+- [x] Talos Linux cluster (`tofu/talos/`) — 3-node HA, all nodes are control plane + worker
 
 ## Prerequisites
 
