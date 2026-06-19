@@ -7,6 +7,7 @@ and Cilium.
 
 | Layer          | Tool                        | Purpose                                          |
 |----------------|-----------------------------|--------------------------------------------------|
+| Task runner    | Just                        | Unified entry point for all commands             |
 | Host bootstrap | Ansible                     | Install libvirt, QEMU, dependencies on Debian 13 |
 | VM management  | OpenTofu + libvirt provider | Provision and manage virtual machines            |
 | GitOps         | Flux CD                     | Reconcile cluster state from `k8s/`              |
@@ -53,12 +54,18 @@ just tofu talos talosctl dashboard                             # live node metri
 ### 5. Bootstrap Flux CD
 
 Requires the [Flux CLI](https://fluxcd.io/flux/installation/#install-the-flux-cli) and
-the [GitHub CLI](https://cli.github.com/) authenticated (`gh auth login`). The bootstrap recipe obtains the token
+the [GitHub CLI](https://cli.github.com/) authenticated with `repo` scope. The bootstrap recipe obtains the token
 automatically via `gh auth token`.
 
 ```bash
-gh auth login   # once, if not already authenticated
-just flux bootstrap vehagn libvirt-tofu-talos
+gh auth login   # if not already authenticated
+just k8s bootstrap $(gh api user -q ".login") libvirt-tofu-talos
+```
+
+If you get `401 Bad credentials`, your OAuth token may be stale — refresh it:
+
+```bash
+gh auth refresh -s repo
 ```
 
 Flux installs itself into `flux-system`, commits its own manifests to `k8s/clusters/talos/flux-system/`, and begins
@@ -67,25 +74,42 @@ reconciling the cluster from `k8s/`. The first reconciliation upgrades Cilium to
 HelmRelease.
 
 ```bash
-just flux status     # watch Flux resources converge
+just k8s status     # watch Flux resources converge
 ```
 
 ## Updating Cilium
 
 Bump `spec.chart.spec.version` in `k8s/infrastructure/cilium/helmrelease.yaml` and push.
-Flux reconciles on the next interval (default 1 h) or immediately via `just flux reconcile`.
+Flux reconciles on the next interval (default 1 h) or immediately via `just k8s reconcile`.
 
 ## Talos + Cilium compatibility notes
 
-Talos requires two non-default Cilium settings that are encoded in both the bootstrap
+Talos requires several non-default Cilium settings that are encoded in both the bootstrap
 `cilium-values` ConfigMap (applied as a Talos inline manifest) and the Flux HelmRelease:
 
-| Setting                                         | Value                                  | Reason                                                                                                           |
-|-------------------------------------------------|----------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| `sysctlfix.enabled`                             | `false`                                | Talos has an immutable root filesystem — `/etc/sysctl.d/` does not exist                                         |
-| `securityContext.capabilities.ciliumAgent`      | explicit list                          | Talos's container runtime (containerd) requires capabilities to be enumerated; it will not grant them implicitly |
-| `securityContext.capabilities.cleanCiliumState` | `[NET_ADMIN, SYS_ADMIN, SYS_RESOURCE]` | Same reason as above                                                                                             |
-| `bpf.vlanBypass`                                | `[0]`                                  | The KVM `br0` bridge (trunk port) forwards VLAN-tagged Unifi ARP broadcasts to VM `eth0`; Cilium drops those frames by default, preventing the upstream router from refreshing its ARP entry for cluster IPs |
+```YAML
+# Point Cilium at Talos's local API server proxy instead of the cluster VIP.
+# The proxy is always reachable on localhost:7445 regardless of VIP state.
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+# Talos has an immutable root filesystem — /etc/sysctl.d/ does not exist.
+sysctlfix:
+  enabled: false
+
+# Allow VLAN-tagged frames through the BPF host hook. The KVM bridge (br0 on a trunk port)
+# forwards VLAN-tagged broadcast traffic from the Unifi switch (e.g. ARP requests) to VM eth0.
+# Without this bypass, Cilium drops those frames and the upstream router cannot refresh its
+# ARP entry for cluster IPs including the VIP.
+bpf:
+  vlanBypass: [ 0 ]
+
+# Talos's container runtime (containerd) does not grant capabilities unless explicitly listed.
+securityContext:
+  capabilities:
+    ciliumAgent: [ CHOWN, KILL, NET_ADMIN, NET_RAW, IPC_LOCK, SYS_ADMIN, SYS_RESOURCE, DAC_OVERRIDE, FOWNER, SETGID, SETUID ]
+    cleanCiliumState: [ NET_ADMIN, SYS_ADMIN, SYS_RESOURCE ]
+```
 
 kube-proxy is disabled in the Talos machine config (`cluster.proxy.disabled: true`) so that
 Cilium's kube-proxy replacement is the sole owner of service routing.
@@ -133,6 +157,14 @@ just tofu talos upgrade
 
 Run `just install-deps` to install all of the above on macOS (Homebrew) or Debian/Ubuntu.
 
+### Dev Container
+
+A [dev container](.devcontainer/devcontainer.json) is provided with all tools pre-installed (OpenTofu, Ansible,
+`just`, `talosctl`, Flux CLI, `kubectl`, `k9s`, `yq`, `kubeconform`, `kubecolor`, and krew plugins). Open the
+repository in VS Code or any IDE with dev container support and choose **Reopen in Container**.
+
+Your SSH agent is forwarded into the container so Ansible can reach the hypervisor without copying keys.
+
 ## Project Structure
 
 ```
@@ -150,7 +182,4 @@ k8s/
   clusters/talos/       Flux entry point — bootstrapped by flux bootstrap --path=k8s/clusters/talos
   infrastructure/       Cluster-wide infrastructure managed by Flux
     cilium/             Cilium CNI — HelmRepository + HelmRelease
-
-flux/
-  justfile              bootstrap / status / reconcile helpers
 ```

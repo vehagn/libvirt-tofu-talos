@@ -1,0 +1,181 @@
+FROM docker.io/ubuntu:26.04
+
+ARG TARGETARCH
+
+ARG USER_ID=1001
+ARG USER_GID=1001
+ARG USERNAME=dev
+
+# Remove ubuntu user
+RUN userdel -r ubuntu
+
+# Install common packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    apt-transport-https \
+    ca-certificates \
+    yamllint \
+    bash-completion \
+    openssh-client \
+    git \
+    gnupg \
+    gnupg2 \
+    curl \
+    wget \
+    unzip \
+    jq \
+    lsb-release \
+    locales \
+    sudo \
+    zsh \
+    python3 \
+    python3-pip \
+    qemu-utils \
+    && \
+    apt-get -y autoremove && \
+    apt-get clean
+
+# Generate en_US.UTF-8 locale
+RUN echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen && \
+    locale-gen
+
+# Add GitHub CLI repo
+RUN mkdir -p -m 755 /etc/apt/keyrings && \
+    mkdir -p -m 755 /etc/apt/sources.list.d && \
+    curl https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+    chmod 644 /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+
+# Add OpenTofu repo
+RUN curl -fsSL https://get.opentofu.org/opentofu.gpg \
+    | tee /etc/apt/keyrings/opentofu.gpg > /dev/null && \
+    curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey \
+    | gpg --no-tty --batch --dearmor -o /etc/apt/keyrings/opentofu-repo.gpg > /dev/null && \
+    chmod 644 /etc/apt/keyrings/opentofu.gpg /etc/apt/keyrings/opentofu-repo.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main" \
+    | tee /etc/apt/sources.list.d/opentofu.list > /dev/null && \
+    echo "deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main" \
+    | tee -a /etc/apt/sources.list.d/opentofu.list > /dev/null && \
+    chmod 644 /etc/apt/sources.list.d/opentofu.list
+
+# Install packages from added repos
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gh \
+    tofu \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Ansible
+RUN pip3 install --break-system-packages ansible
+
+# Install just
+RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+# Install kubectl
+RUN curl -sSLO "https://dl.k8s.io/release/$(curl -sSL https://dl.k8s.io/release/stable.txt)/bin/linux/${TARGETARCH}/kubectl" && \
+    curl -sSLO "https://dl.k8s.io/release/$(curl -sSL https://dl.k8s.io/release/stable.txt)/bin/linux/${TARGETARCH}/kubectl.sha256" && \
+    echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl kubectl.sha256
+
+# Install talosctl
+RUN curl -sSL -o talosctl "https://github.com/siderolabs/talos/releases/latest/download/talosctl-linux-${TARGETARCH}" && \
+    install -o root -g root -m 0755 talosctl /usr/local/bin/talosctl && \
+    rm talosctl
+
+# Install Flux CLI
+RUN FLUX_VERSION=$(curl -sSL "https://api.github.com/repos/fluxcd/flux2/releases/latest" | jq -r .tag_name | tr -d v) && \
+    curl -sSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    | tar xz -C /usr/local/bin
+
+# Install yq
+RUN curl -sSL -o yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${TARGETARCH}" && \
+    install -o root -g root -m 0755 yq /usr/local/bin/yq && \
+    rm yq
+
+# Install kubeconform
+RUN curl -sSL "https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-${TARGETARCH}.tar.gz" \
+    | tar xz -C /usr/local/bin
+
+# Install kubecolor
+RUN curl -sSL -o kubecolor.deb "https://kubecolor.github.io/packages/deb/pool/main/k/kubecolor/kubecolor_$(curl -sSL https://kubecolor.github.io/packages/deb/version)_${TARGETARCH}.deb" && \
+    dpkg -i kubecolor.deb && \
+    rm kubecolor.deb
+
+# Install k9s
+RUN curl -sSL -o k9s.deb "https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_${TARGETARCH}.deb" && \
+    dpkg -i k9s.deb && \
+    rm k9s.deb
+
+# Add user and configure ZSH
+RUN groupadd --gid ${USER_GID} ${USERNAME} && \
+    useradd -s /bin/bash --uid ${USER_ID} --gid ${USERNAME} -m ${USERNAME} && \
+    echo ${USERNAME} ALL=\(root\) NOPASSWD:ALL \
+    | tee /etc/sudoers.d/${USERNAME} > /dev/null && \
+    chmod 0440 /etc/sudoers.d/${USERNAME} && \
+    mkdir -p /home/${USERNAME} && \
+    mkdir -p /home/${USERNAME}/.config && \
+    cp /etc/skel/.bashrc /home/${USERNAME}/.bashrc && \
+    cp /etc/skel/.profile /home/${USERNAME}/.profile && \
+    echo "$(curl -sSfL https://raw.githubusercontent.com/devcontainers/features/refs/heads/main/src/common-utils/scripts/rc_snippet.sh)" \
+    | tee -a /etc/bash.bashrc && \
+    echo "$(curl -sSfL https://raw.githubusercontent.com/devcontainers/features/refs/heads/main/src/common-utils/scripts/bash_theme_snippet.sh)" \
+    | tee -a /root/.bashrc && \
+    echo "$(curl -sSfL https://raw.githubusercontent.com/devcontainers/features/refs/heads/main/src/common-utils/scripts/bash_theme_snippet.sh)" \
+    | tee -a /home/${USERNAME}/.bashrc && \
+    chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.bashrc && \
+    echo "source ${HOME}/.profile" \
+    | tee -a /home/${USERNAME}/.zprofile && \
+    chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.zprofile && \
+    echo "$(curl -sSfL https://raw.githubusercontent.com/devcontainers/features/refs/heads/main/src/common-utils/scripts/rc_snippet.sh)" \
+    | tee -a /etc/zsh/zshrc && \
+    chsh --shell /bin/zsh ${USERNAME} && \
+    umask g-w,o-w && \
+    mkdir -p /home/${USERNAME}/.oh-my-zsh && \
+    git clone --depth=1 \
+        -c core.eol=lf \
+        -c core.autocrlf=false \
+        -c fsck.zeroPaddedFilemode=ignore \
+        -c fetch.fsck.zeroPaddedFilemode=ignore \
+        -c receive.fsck.zeroPaddedFilemode=ignore \
+        "https://github.com/ohmyzsh/ohmyzsh" "/home/${USERNAME}/.oh-my-zsh" 2>&1 && \
+    cd /home/${USERNAME}/.oh-my-zsh && \
+    git repack -a -d -f --depth=1 --window=1 && \
+    mkdir -p /home/${USERNAME}/.oh-my-zsh/custom/themes && \
+    curl -sSfL https://raw.githubusercontent.com/devcontainers/features/refs/heads/main/src/common-utils/scripts/devcontainers.zsh-theme \
+    -o /home/${USERNAME}/.oh-my-zsh/custom/themes/codespaces.zsh-theme && \
+    ln -sf "/home/${USERNAME}/.oh-my-zsh/custom/themes/devcontainers.zsh-theme" "/home/${USERNAME}/.oh-my-zsh/custom/themes/codespaces.zsh-theme" && \
+    cat "/home/${USERNAME}/.oh-my-zsh/templates/zshrc.zsh-template" > /home/${USERNAME}/.zshrc && \
+    echo "DISABLE_AUTO_UPDATE=true" >> /home/${USERNAME}/.zshrc && \
+    echo "DISABLE_UPDATE_PROMPT=true" >> /home/${USERNAME}/.zshrc && \
+    sed -i -e 's/ZSH_THEME=.*/ZSH_THEME="devcontainers"/g' /home/${USERNAME}/.zshrc && \
+    chown ${USERNAME}:${USERNAME} /home/${USERNAME} && \
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+
+USER ${USERNAME}
+WORKDIR /home/${USERNAME}
+
+# Install krew
+RUN (cd "$(mktemp -d)" && \
+    curl -sSL -o krew.tar.gz "https://github.com/kubernetes-sigs/krew/releases/latest/download/krew-linux_${TARGETARCH}.tar.gz" && \
+    tar zxvf krew.tar.gz && \
+    ./krew-linux_${TARGETARCH} install krew && \
+    rm *) && \
+    echo "export PATH=\"${KREW_ROOT:-$HOME/.krew}/bin:$PATH\"" >> ${HOME}/.bashrc
+
+# Install kubectl plugins for context and namespace switching
+RUN PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH" kubectl krew install ctx ns
+
+# Alias everything
+RUN echo "alias kubectl='kubecolor'" >> ${HOME}/.bash_aliases && \
+    echo "alias k='kubectl'" >> ${HOME}/.bash_aliases && \
+    echo "alias kc='kubeconform'" >> ${HOME}/.bash_aliases && \
+    echo "alias tf='tofu'" >> ${HOME}/.bash_aliases && \
+    echo "alias tl='talosctl'" >> ${HOME}/.bash_aliases && \
+    echo "alias fl='flux'" >> ${HOME}/.bash_aliases && \
+    echo "alias ap='ansible-playbook'" >> ${HOME}/.bash_aliases && \
+    echo "alias yl='yamllint'" >> ${HOME}/.bash_aliases

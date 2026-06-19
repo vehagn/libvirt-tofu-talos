@@ -1,0 +1,86 @@
+set shell := ["bash", "-c"]
+set dotenv-path := "../setup.env"
+set dotenv-load
+set dotenv-required := false
+
+[private]
+default:
+    @just --list
+
+kubeconfig := "../tofu/talos/output/kubeconfig"
+kubectl := "KUBECONFIG=" + kubeconfig + " kubectl"
+flux    := "KUBECONFIG=" + kubeconfig + " flux"
+
+# ── kubectl ──────────────────────────────────────────────────────────────────
+
+# Run an arbitrary kubectl command
+# Usage: just k8s kubectl get pods -A
+kubectl *args:
+    {{ kubectl }} {{ args }}
+
+# Show all resources across all namespaces
+get-all:
+    @{{ kubectl }} get all --all-namespaces
+
+# Show nodes with resource usage
+nodes:
+    @{{ kubectl }} get nodes -o wide
+
+# Show pods across all namespaces
+pods:
+    @{{ kubectl }} get pods --all-namespaces
+
+# Show recent events (newest last)
+events:
+    @{{ kubectl }} get events --all-namespaces --sort-by='.lastTimestamp'
+
+# Node and pod resource usage (requires metrics-server)
+top:
+    @{{ kubectl }} top nodes
+    @echo ""
+    @{{ kubectl }} top pods --all-namespaces
+
+# Tail logs for a pod
+# Usage: just k8s logs <pod> [-n <namespace>] [-c <container>]
+logs pod *args:
+    {{ kubectl }} logs {{ pod }} {{ args }} --follow
+
+# Describe a resource
+# Usage: just k8s describe pod <name> -n <namespace>
+describe kind name *args:
+    {{ kubectl }} describe {{ kind }} {{ name }} {{ args }}
+
+# ── Flux ─────────────────────────────────────────────────────────────────────
+
+# Bootstrap Flux onto the Talos cluster (uses gh CLI to obtain the GitHub token)
+# Usage: just k8s bootstrap <github-owner> <repository-name>
+bootstrap owner repo:
+    KUBECONFIG={{ kubeconfig }} GITHUB_TOKEN=$(gh auth token) flux bootstrap github \
+        --owner={{ owner }} \
+        --repository={{ repo }} \
+        --path=k8s/clusters/talos \
+        --personal \
+        --ssh-key-algorithm=ecdsa
+
+# Show reconciliation status for all Flux resources
+status:
+    @{{ flux }} get all --all-namespaces
+
+# Force-reconcile the root GitRepository and Kustomization
+reconcile:
+    {{ flux }} reconcile source git flux-system
+    {{ flux }} reconcile kustomization flux-system --with-source
+
+# Tail Flux controller logs
+flux-logs:
+    {{ flux }} logs --follow --all-namespaces
+
+# Suspend a Flux resource to pause reconciliation
+# Usage: just k8s suspend kustomization flux-system
+suspend kind name *args:
+    {{ flux }} suspend {{ kind }} {{ name }} {{ args }}
+
+# Resume a suspended Flux resource
+# Usage: just k8s resume kustomization flux-system
+resume kind name *args:
+    {{ flux }} resume {{ kind }} {{ name }} {{ args }}

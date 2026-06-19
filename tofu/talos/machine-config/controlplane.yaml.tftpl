@@ -43,8 +43,8 @@ cluster:
         data:
           values.yaml: |
             kubeProxyReplacement: true
-            k8sServiceHost: ${vip}
-            k8sServicePort: 6443
+            k8sServiceHost: localhost
+            k8sServicePort: 7445
             ipam:
               mode: kubernetes
             sysctlfix:
@@ -136,12 +136,9 @@ cluster:
                   image: quay.io/cilium/cilium-cli:v0.19.2 # renovate: github-releases=cilium/cilium-cli
                   env:
                     - name: KUBERNETES_SERVICE_HOST
-                      valueFrom:
-                        fieldRef:
-                          apiVersion: v1
-                          fieldPath: status.podIP
+                      value: localhost
                     - name: KUBERNETES_SERVICE_PORT
-                      value: "6443"
+                      value: "7445"
                   volumeMounts:
                     - name: values
                       mountPath: /root/app/values.yaml

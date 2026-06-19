@@ -4,7 +4,7 @@ set dotenv-load
 
 mod ansible "ansible/justfile"
 mod tofu "tofu/justfile"
-mod flux "flux/justfile"
+mod k8s "k8s/justfile"
 
 # List available recipes
 default:
