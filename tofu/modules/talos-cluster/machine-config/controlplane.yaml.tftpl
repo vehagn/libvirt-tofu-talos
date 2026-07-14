@@ -1,0 +1,157 @@
+machine:
+  network:
+    interfaces:
+      - deviceSelector:
+          physical: true
+        dhcp: true
+        vip:
+          ip: ${vip}
+  install:
+    image: ${installer_image}
+    disk: /dev/vda
+    wipe: false
+  nodeLabels:
+    topology.kubernetes.io/region: ${cluster_name}
+    topology.kubernetes.io/zone: ${hostname}
+
+cluster:
+  network:
+    cni:
+      name: none
+  proxy:
+    disabled: true
+  allowSchedulingOnControlPlanes: true
+  controllerManager:
+    extraArgs:
+      bind-address: 0.0.0.0
+  scheduler:
+    extraArgs:
+      bind-address: 0.0.0.0
+  etcd:
+    extraArgs:
+      listen-metrics-urls: http://0.0.0.0:2381
+  discovery:
+    enabled: true
+  inlineManifests:
+    - name: cilium-values
+      contents: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: cilium-values
+          namespace: kube-system
+        data:
+          values.yaml: |
+            kubeProxyReplacement: true
+            k8sServiceHost: localhost
+            k8sServicePort: 7445
+            ipam:
+              mode: kubernetes
+            sysctlfix:
+              enabled: false
+            bpf:
+              vlanBypass:
+                - 0
+            securityContext:
+              capabilities:
+                ciliumAgent:
+                  - CHOWN
+                  - KILL
+                  - NET_ADMIN
+                  - NET_RAW
+                  - IPC_LOCK
+                  - SYS_ADMIN
+                  - SYS_RESOURCE
+                  - DAC_OVERRIDE
+                  - FOWNER
+                  - SETGID
+                  - SETUID
+                cleanCiliumState:
+                  - NET_ADMIN
+                  - SYS_ADMIN
+                  - SYS_RESOURCE
+    - name: cilium-install
+      contents: |-
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: cilium-install
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: cluster-admin
+        subjects:
+          - kind: ServiceAccount
+            name: cilium-install
+            namespace: kube-system
+        ---
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: cilium-install
+          namespace: kube-system
+        ---
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: cilium-install
+          namespace: kube-system
+        spec:
+          backoffLimit: 10
+          template:
+            metadata:
+              labels:
+                app: cilium-install
+            spec:
+              restartPolicy: OnFailure
+              tolerations:
+                - operator: Exists
+                - effect: NoSchedule
+                  operator: Exists
+                - effect: NoExecute
+                  operator: Exists
+                - effect: PreferNoSchedule
+                  operator: Exists
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                  effect: NoSchedule
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                  effect: NoExecute
+                - key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                  effect: PreferNoSchedule
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: node-role.kubernetes.io/control-plane
+                            operator: Exists
+              serviceAccountName: cilium-install
+              hostNetwork: true
+              containers:
+                - name: cilium-install
+                  image: quay.io/cilium/cilium-cli:v0.19.2 # renovate: github-releases=cilium/cilium-cli
+                  env:
+                    - name: KUBERNETES_SERVICE_HOST
+                      value: localhost
+                    - name: KUBERNETES_SERVICE_PORT
+                      value: "7445"
+                  volumeMounts:
+                    - name: values
+                      mountPath: /root/app/values.yaml
+                      subPath: values.yaml
+                  command:
+                    - cilium
+                    - install
+                    - --version=v1.19.4 # renovate: github-releases=cilium/cilium
+                    - --set
+                    - kubeProxyReplacement=true
+                    - --values
+                    - values.yaml
+              volumes:
+                - name: values
+                  configMap:
+                    name: cilium-values

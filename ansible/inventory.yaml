@@ -14,3 +14,6 @@ all:
         ansible_python_interpreter: /usr/bin/python3
         # User to add to the libvirt group (defaults to ansible_user)
         libvirt_user: "{{ ansible_user }}"
+        # SSH public keys to authorize for the ansible service account (used by prepare-host.yaml)
+        # prepare_host_ssh_public_keys:
+        #   - "ssh-ed25519 AAAA... user@host"

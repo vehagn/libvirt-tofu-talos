@@ -1,0 +1,12 @@
+machine:
+  network:
+    interfaces:
+      - deviceSelector:
+          physical: true
+        dhcp: true
+  install:
+    image: ${installer_image}
+    disk: /dev/vda
+    wipe: false
+  nodeLabels:
+    topology.kubernetes.io/zone: ${hostname}

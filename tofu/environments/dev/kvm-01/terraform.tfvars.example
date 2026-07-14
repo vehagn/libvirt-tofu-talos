@@ -1,0 +1,36 @@
+libvirt_uri = "qemu+ssh://root@kvm-01.local/system"
+
+# pool_path        = "/var/lib/libvirt/images/dev"
+# bridge_interface = "br0"
+
+ssh_authorized_keys = [
+  # "ssh-ed25519 AAAA... user@host",
+]
+
+ubuntu_vms = {
+  "ubuntu-01" = {}
+  "ubuntu-02" = { memory_mb = 4096, vcpu_count = 4 }
+  "web-01"    = { extra_packages = ["nginx"] }
+}
+
+# GitHub Actions self-hosted runners
+# Get a registration token: repo/org → Settings → Actions → Runners → New self-hosted runner
+# Each token is valid for 1 hour; re-run `just apply` within that window.
+github_runners = {
+  "gh-runner-01" = {
+    github_url     = "https://github.com/your-org/your-repo"
+    runner_version = "2.323.0"
+  }
+  "gh-runner-02" = {
+    github_url     = "https://github.com/your-org/your-repo"
+    runner_version = "2.323.0"
+    runner_labels  = ["large"]
+    memory_mb      = 8192
+    vcpu_count     = 8
+  }
+}
+
+runner_tokens = {
+  "gh-runner-01" = "REPLACE_WITH_TOKEN_FROM_GITHUB"
+  "gh-runner-02" = "REPLACE_WITH_TOKEN_FROM_GITHUB"
+}

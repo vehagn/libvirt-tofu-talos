@@ -3,8 +3,10 @@ set dotenv-path := "../setup.env"
 set dotenv-load
 set dotenv-required := false
 
-mod ubuntu "ubuntu/justfile"
 mod talos "talos/justfile"
+mod dev "environments/dev/kvm-01/justfile"
+mod dev-kvm-talos-01 "environments/dev/kvm-talos-01/justfile"
+mod dev-talos "environments/dev/talos/justfile"
 
 [private]
 default:

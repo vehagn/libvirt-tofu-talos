@@ -1,0 +1,25 @@
+# S3-compatible remote state backend.
+# 1. Copy this file to backend.tofu and fill in your values.
+# 2. Add credentials to setup.env (loaded as env vars by the justfile):
+#      AWS_ACCESS_KEY_ID=<access-key>
+#      AWS_SECRET_ACCESS_KEY=<secret-key>
+# 3. Run: just init   (migrates local state to the bucket on first use)
+#
+# Tested with: AWS S3, MinIO, Garage, Cloudflare R2, Backblaze B2, Hetzner Object Storage.
+
+terraform {
+  backend "s3" {
+    bucket = "my-tofu-state"
+    key    = "dev/kvm-01/terraform.tfstate"
+    region = "us-east-1" # required by the SDK; use any valid string for non-AWS providers
+
+    # Non-AWS S3-compatible endpoint — omit for real AWS.
+    endpoint         = "https://s3.example.com"
+    force_path_style = true # required for path-style URLs (MinIO, Garage, etc.)
+
+    # Disable AWS-specific checks that fail against non-AWS endpoints.
+    skip_credentials_validation = true
+    skip_metadata_api_check     = true
+    skip_region_validation      = true
+  }
+}

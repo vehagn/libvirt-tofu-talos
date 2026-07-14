@@ -5,13 +5,14 @@ and Cilium.
 
 ## Overview
 
-| Layer          | Tool                        | Purpose                                          |
-|----------------|-----------------------------|--------------------------------------------------|
-| Task runner    | Just                        | Unified entry point for all commands             |
-| Host bootstrap | Ansible                     | Install libvirt, QEMU, dependencies on Debian 13 |
-| VM management  | OpenTofu + libvirt provider | Provision and manage virtual machines            |
-| GitOps         | Flux CD                     | Reconcile cluster state from `k8s/`              |
-| CNI            | Cilium                      | Networking with kube-proxy replacement           |
+| Layer          | Tool                        | Directory   | Purpose                                            |
+|----------------|-----------------------------|-------------|----------------------------------------------------|
+| Task runner    | Just                        | `justfile`  | Unified entry point for all commands               |
+| Host bootstrap | Ansible                     | `ansible/`  | Install libvirt, QEMU, AppArmor, bridge on Debian 13 |
+| VM management  | OpenTofu + libvirt provider | `tofu/`     | Provision and manage virtual machines              |
+| Kubernetes     | Talos Linux                 | `tofu/`     | 3-node HA cluster (control plane + worker)         |
+| GitOps         | Flux CD                     | `k8s/`      | Reconcile cluster state from `k8s/`                |
+| CNI            | Cilium                      | `k8s/`      | Networking with kube-proxy replacement             |
 
 ## Quick Start
 
@@ -28,27 +29,22 @@ just configure   # generates inventory.local.yaml and terraform.tfvars files
 just ansible bootstrap
 ```
 
-### 3. Provision an Ubuntu VM (optional PoC)
+### 3. Provision Talos VMs
 
 ```bash
-just tofu ubuntu apply
+just dev-kvm-talos-01 apply
 ```
 
-### 4. Spin up a Talos cluster
+### 4. Bootstrap the Talos cluster
 
 ```bash
-just tofu talos init
-just tofu talos apply
+just dev-talos apply
 ```
 
-Talos applies two inline manifests during bootstrap: a `cilium-values` ConfigMap containing the cluster VIP and IPAM
-settings, and a `cilium-install` Job that runs `cilium-cli` to install Cilium before any workload pods schedule. The
-cluster will not reach `Ready` until this Job completes (~2 minutes).
-
 ```bash
-just tofu talos kubectl get nodes                              # wait for all three nodes Ready
-just tofu talos kubectl -n kube-system get job cilium-install  # confirm Job succeeded
-just tofu talos talosctl dashboard                             # live node metrics and logs
+just dev-talos kubectl get nodes                              # wait for all three nodes Ready
+just dev-talos kubectl -n kube-system get job cilium-install  # confirm Job succeeded
+just dev-talos talosctl dashboard                             # live node metrics and logs
 ```
 
 ### 5. Bootstrap Flux CD
@@ -77,9 +73,52 @@ HelmRelease.
 just k8s status     # watch Flux resources converge
 ```
 
-## Updating Cilium
+## Ansible — Hypervisor Bootstrap
 
-Bump `spec.chart.spec.version` in `k8s/infrastructure/cilium/helmrelease.yaml` and push.
+Two-phase bootstrap of a Debian 13 host. See [ansible/README.md](ansible/README.md) for roles, variables, security
+model, and network topology.
+
+1. **`prepare-host`** — runs once as root; creates the `ansible` service account with passwordless sudo
+2. **`configure-libvirt`** — configures QEMU, libvirt, AppArmor, and a host bridge via NetworkManager
+
+| Role           | Purpose                                                                  |
+|----------------|--------------------------------------------------------------------------|
+| `prepare_host` | Create ansible service account, sudoers, authorized keys                 |
+| `common`       | Install system utilities                                                 |
+| `libvirt_host` | QEMU + libvirt packages, AppArmor, polkit rule, qemu.conf, host bridge   |
+
+QEMU processes run as `libvirt-qemu` (not root), confined by per-VM AppArmor profiles. The management user (`ansible`)
+gets a polkit rule granting full libvirt API access without sudo.
+
+## OpenTofu — VM Management
+
+Environments live in `tofu/environments/<env>/`. Each hypervisor is a separate root module with its own statefile.
+See [tofu/README.md](tofu/README.md) for the full workflow, per-node schematics, multi-hypervisor setup, Ubuntu VM
+configuration, and command reference.
+
+| Module             | Purpose                                                             |
+|--------------------|---------------------------------------------------------------------|
+| `libvirt-vm`       | Bare libvirt domain — disks, network interfaces, no cloud-init      |
+| `ubuntu-vm`        | Ubuntu 24.04 LTS — cloud-init, SSH keys, extra packages             |
+| `talos-vm`         | Talos OS overlay — qcow2 backing image, data disk, virsh IP discovery |
+| `talos-cluster`    | Cluster bootstrapping only — no libvirt; accepts pre-discovered IPs |
+| `github-runner-vm` | GitHub Actions self-hosted runner on Ubuntu                         |
+
+For the Talos cluster, apply order is mandatory: `kvm-talos-01` must complete before `talos` (the `talos` environment
+reads `kvm-talos-01`'s statefile via `terraform_remote_state`).
+
+## k8s — GitOps
+
+Cluster state is managed with Flux CD reconciling from `k8s/`:
+
+```
+k8s/
+  clusters/talos/       Flux entry point (--path passed to flux bootstrap)
+  infrastructure/
+    cilium/             Cilium HelmRepository + HelmRelease
+```
+
+To upgrade Cilium: bump `spec.chart.spec.version` in `k8s/infrastructure/cilium/helmrelease.yaml` and push.
 Flux reconciles on the next interval (default 1 h) or immediately via `just k8s reconcile`.
 
 ## Talos + Cilium compatibility notes
@@ -115,11 +154,11 @@ kube-proxy is disabled in the Talos machine config (`cluster.proxy.disabled: tru
 Cilium's kube-proxy replacement is the sole owner of service routing.
 
 If Cilium pods are stuck in `Init:CrashLoopBackOff` after a fresh cluster, check which init
-container is failing with `just tofu talos talosctl dashboard` or:
+container is failing with `just dev-talos talosctl dashboard` or:
 
 ```bash
-just tofu talos kubectl -n kube-system logs <cilium-pod> -c apply-sysctl-overwrites
-just tofu talos kubectl -n kube-system logs <cilium-pod> -c clean-cilium-state
+just dev-talos kubectl -n kube-system logs <cilium-pod> -c apply-sysctl-overwrites
+just dev-talos kubectl -n kube-system logs <cilium-pod> -c clean-cilium-state
 ```
 
 ## VIP / DHCP conflict
@@ -132,15 +171,15 @@ connecting via the VIP.
 Symptoms: `arping -c 3 -I br0 <VIP>` from the hypervisor returns replies from **two different MACs**.
 
 Fix: either reserve the VIP in your DHCP server, or stop any VM that holds the conflicting IP.
-`just tofu ubuntu destroy` tears down the Ubuntu PoC if it happens to own the address.
 
 ## Rolling OS upgrades
 
-Change `image.version` in `tofu/talos/terraform.tfvars`, then apply with parallelism 1 so etcd quorum is preserved
-across the three control-plane nodes:
+Change `image.version` in `tofu/environments/dev/kvm-talos-01/terraform.tfvars`, then apply with parallelism 1 so
+etcd quorum is preserved across the three control-plane nodes:
 
 ```bash
-just tofu talos upgrade
+just dev-kvm-talos-01 apply   # re-downloads new image, recreates VMs
+just dev-talos upgrade        # rolling restart with parallelism=1
 ```
 
 ## Requirements
@@ -151,7 +190,7 @@ just tofu talos upgrade
 - `qemu-img` — for converting Talos images to qcow2 before upload (`brew install qemu` / `apt install qemu-utils`)
 - `jq` — for node IP discovery (`brew install jq` / `apt install jq`)
 - [Flux CLI](https://fluxcd.io/flux/installation/#install-the-flux-cli) >= 2.0 (`brew install fluxcd/tap/flux`)
-- [GitHub CLI](https://cli.github.com/) (`brew install gh`) — used to obtain a GitHub token for `just flux bootstrap`
+- [GitHub CLI](https://cli.github.com/) (`brew install gh`) — used to obtain a GitHub token for `just k8s bootstrap`
 - Debian 13 host with SSH access
 - SSH key pair
 
@@ -169,17 +208,29 @@ Your SSH agent is forwarded into the container so Ansible can reach the hypervis
 
 ```
 ansible/
-  roles/libvirt_host/   Install and configure libvirt + QEMU on the host
-  site.yaml              Main playbook
-  inventory.yaml         Example inventory (copy to inventory.local.yaml)
+  roles/
+    prepare_host/         Create ansible service account (phase 1)
+    common/               System utilities
+    libvirt_host/         QEMU, libvirt, AppArmor, host bridge (phase 2)
+  prepare-host.yaml       Phase 1 playbook
+  site.yaml               Phase 2 playbook (configure-libvirt)
+  inventory.yaml          envsubst template — generate with `just configure`
 
 tofu/
-  modules/vm/           Reusable libvirt VM module (cloud-init, disk, network)
-  ubuntu/               Ubuntu 26.04 LTS proof-of-concept environment
-  talos/                Three-node Talos Linux cluster (control plane + workload)
+  modules/
+    libvirt-vm/           Bare libvirt domain
+    ubuntu-vm/            Ubuntu 24.04 LTS + cloud-init
+    talos-vm/             Talos OS overlay + virsh IP discovery
+    talos-cluster/        Talos bootstrapping (no libvirt)
+    github-runner-vm/     GitHub Actions self-hosted runner
+  environments/dev/
+    kvm-01/               Ubuntu VMs + GitHub runners
+    kvm-talos-01/         Talos VM nodes (pool, per-schematic images, VMs)
+    talos/                Talos cluster bootstrapping
+  talos/                  Legacy standalone Talos root module (existing state)
 
 k8s/
-  clusters/talos/       Flux entry point — bootstrapped by flux bootstrap --path=k8s/clusters/talos
-  infrastructure/       Cluster-wide infrastructure managed by Flux
-    cilium/             Cilium CNI — HelmRepository + HelmRelease
+  clusters/talos/         Flux entry point
+  infrastructure/
+    cilium/               Cilium CNI — HelmRepository + HelmRelease
 ```

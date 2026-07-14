@@ -1,0 +1,49 @@
+set shell := ["zsh", "-lc"]
+set dotenv-path := "../../../setup.env"
+set dotenv-load
+set dotenv-required := false
+
+[private]
+default:
+    @just --list
+
+# Generate terraform.tfvars from setup.env
+configure:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bridge="${VM_BRIDGE_INTERFACE:-br0}"
+    {
+        printf 'libvirt_uri         = "qemu+ssh://%s@%s/system"\n' "$HYPERVISOR_USER" "$HYPERVISOR_HOST"
+        printf 'vm_bridge_interface = "%s"\n\n' "$bridge"
+        printf 'image = {\n  version = "v1.12.0"\n}\n\n'
+        printf 'nodes = {\n'
+        printf '  "cp-00" = {}\n'
+        printf '  "cp-01" = {}\n'
+        printf '  "cp-02" = {}\n'
+        printf '}\n'
+    } > terraform.tfvars
+    echo "Created terraform.tfvars (3 nodes, default schematic)"
+
+# Initialise OpenTofu providers and modules
+init:
+    tofu init
+
+# Preview changes without applying
+plan:
+    tofu plan
+
+# Create/update nodes
+apply:
+    tofu apply
+
+# Destroy all managed resources
+destroy:
+    tofu destroy
+
+# Print node IPs and installer images (pass these to the talos environment)
+ips:
+    @tofu output -json nodes | jq -r 'to_entries[] | "\(.key): \(.value.ip)  (\(.value.installer_image))"'
+
+# Open a serial console to a node (Ctrl+] to exit)
+console node:
+    @ssh -t "${HYPERVISOR_USER}@${HYPERVISOR_HOST}" "virsh console {{ node }}"

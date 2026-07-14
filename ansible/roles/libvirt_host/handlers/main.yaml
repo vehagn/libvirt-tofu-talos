@@ -7,6 +7,16 @@
     name: "{{ libvirt_service }}"
     state: restarted
 
+- name: Reload AppArmor
+  ansible.builtin.service:
+    name: apparmor
+    state: reloaded
+
+- name: Restart polkit
+  ansible.builtin.service:
+    name: polkit
+    state: restarted
+
 - name: Restart NetworkManager
   ansible.builtin.service:
     name: NetworkManager

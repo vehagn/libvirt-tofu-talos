@@ -1,0 +1,27 @@
+libvirt_uri         = "qemu+ssh://${HYPERVISOR_USER}@${HYPERVISOR_HOST}/system"
+vm_bridge_interface = "${VM_BRIDGE_INTERFACE}"
+
+image = {
+  version = "v1.12.0"
+}
+
+# Set once the cluster is bootstrapped to prevent the VIP being returned as
+# a node's primary IP on subsequent applies.
+# cluster_vip = "192.168.1.99"
+
+# Nodes default to schematics/default.yaml (qemu-guest-agent only).
+# Nodes with different hardware specify their own schematic_path.
+nodes = {
+  "cp-00" = {}
+  "cp-01" = {}
+  "cp-02" = {}
+
+  # Example: GPU node with a different schematic
+  # "gpu-00" = { schematic_path = "schematics/nvidia.yaml", memory_mb = 32768, vcpu = 8 }
+}
+
+# Optional defaults (shown values are the defaults)
+# node_vcpu         = 4
+# node_memory_mb    = 6144
+# node_os_disk_gb   = 12
+# node_data_disk_gb = 24

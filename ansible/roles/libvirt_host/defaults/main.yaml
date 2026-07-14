@@ -9,8 +9,22 @@ libvirt_packages:
   - python3-libvirt
   - cpu-checker
 
+apparmor_packages:
+  - apparmor
+  - apparmor-utils
+
 libvirt_service: libvirtd
 libvirt_user: "{{ ansible_user }}"
+libvirt_user_groups:
+  - libvirt
+  - kvm
+
+libvirt_qemu_user: libvirt-qemu
+libvirt_qemu_group: kvm
+libvirt_qemu_dynamic_ownership: 1
+libvirt_security_driver: apparmor
+
+libvirt_pool_path: /var/lib/libvirt/images
 
 libvirt_bridge_name: br0
 libvirt_bridge_configure: true

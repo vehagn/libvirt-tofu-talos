@@ -1,0 +1,70 @@
+set shell := ["zsh", "-lc"]
+set dotenv-path := "../../../setup.env"
+set dotenv-load
+set dotenv-required := false
+
+[private]
+default:
+    @just --list
+
+# Generate terraform.tfvars from setup.env
+configure:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    vip="${TALOS_VIP:-192.168.1.99}"
+    version="${TALOS_VERSION:-v1.12.0}"
+    {
+        printf 'cluster = {\n'
+        printf '  name               = "talos"\n'
+        printf '  vip                = "%s"\n' "$vip"
+        printf '  kubernetes_version = "v1.32.0"\n'
+        printf '}\n\n'
+        printf 'talos_version = "%s"\n\n' "$version"
+        printf 'kvm_talos_state_paths = {\n'
+        printf '  kvm-talos-01 = "../kvm-talos-01/terraform.tfstate"\n'
+        printf '}\n'
+    } > terraform.tfvars
+    echo "Created terraform.tfvars (vip=${vip}, talos ${version})"
+
+# Initialise OpenTofu providers and modules
+init:
+    tofu init
+
+# Preview changes without applying
+plan:
+    tofu plan
+
+# Bootstrap the cluster (or apply config drift). Run kvm-talos-01 apply first.
+apply:
+    tofu apply
+
+# Roll OS upgrades sequentially to preserve etcd quorum
+upgrade:
+    tofu apply -parallelism=1
+
+# Destroy all managed resources
+destroy:
+    tofu destroy
+
+# Run talosctl against the cluster
+talosctl *args:
+    @talosctl --talosconfig output/talosconfig {{ args }}
+
+# Run kubectl against the cluster
+kubectl *args:
+    #!/usr/bin/env bash
+    if kubectl --kubeconfig output/kubeconfig {{ args }}; then
+        exit 0
+    fi
+    rc=$?
+    vip="${TALOS_VIP:-}"
+    printf '\n--- kubectl failed; diagnostics ---\n' >&2
+    if [[ -n "$vip" ]]; then
+        printf '  VIP %s ICMP:     ' "$vip" >&2
+        timeout 2 ping -c1 "$vip" &>/dev/null && printf 'reachable\n' >&2 || printf 'unreachable\n' >&2
+        printf '  VIP %s TCP 6443: ' "$vip" >&2
+        nc -4 -zw3 "$vip" 6443 2>/dev/null && printf 'open\n' >&2 || printf 'closed/filtered\n' >&2
+    fi
+    printf '  Talos node health (direct IPs):\n' >&2
+    talosctl --talosconfig output/talosconfig get members -o table 2>&1 | sed 's/^/    /' >&2 || true
+    exit $rc

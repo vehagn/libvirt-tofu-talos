@@ -4,6 +4,18 @@
     name: "{{ libvirt_packages }}"
     state: present
     update_cache: true
+    cache_valid_time: 3600
+
+- name: Install AppArmor packages
+  ansible.builtin.apt:
+    name: "{{ apparmor_packages }}"
+    state: present
+
+- name: Enable and start AppArmor
+  ansible.builtin.service:
+    name: apparmor
+    state: started
+    enabled: true
 
 - name: Enable and start libvirtd
   ansible.builtin.service:
@@ -11,26 +23,76 @@
     state: started
     enabled: true
 
-- name: Add user to libvirt group
+- name: Ensure libvirt groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ libvirt_user_groups }}"
+
+- name: Add user to libvirt groups
   ansible.builtin.user:
     name: "{{ libvirt_user }}"
-    groups: libvirt
+    groups: "{{ libvirt_user_groups | join(',') }}"
     append: true
   notify: Reset connection
 
-# Run VMs as root for bridge access; security_driver=none disables AppArmor/SELinux confinement (inactive on Debian 13).
-- name: Configure QEMU security and user settings
+- name: Configure QEMU user, group, and security driver
   ansible.builtin.lineinfile:
     path: /etc/libvirt/qemu.conf
     regexp: "^#?\\s*{{ item.key }}\\s*="
     line: '{{ item.key }} = "{{ item.value }}"'
   loop:
-    - { key: user, value: root }
-    - { key: group, value: root }
-    - { key: security_driver, value: none }
+    - { key: user, value: "{{ libvirt_qemu_user }}" }
+    - { key: group, value: "{{ libvirt_qemu_group }}" }
+    - { key: security_driver, value: "{{ libvirt_security_driver }}" }
   notify: Restart libvirtd
 
-- name: Flush handlers to restart libvirtd immediately
+- name: Configure QEMU dynamic_ownership
+  ansible.builtin.lineinfile:
+    path: /etc/libvirt/qemu.conf
+    regexp: "^#?\\s*dynamic_ownership\\s*="
+    line: "dynamic_ownership = {{ libvirt_qemu_dynamic_ownership | int }}"
+  notify: Restart libvirtd
+
+- name: Allow libvirt user to manage libvirt via polkit
+  ansible.builtin.copy:
+    dest: "/etc/polkit-1/rules.d/50-libvirt-{{ libvirt_user }}.rules"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      polkit.addRule(function(action, subject) {
+        if (action.id.indexOf("org.libvirt.unix.") === 0 &&
+            subject.user === "{{ libvirt_user }}") {
+          return polkit.Result.YES;
+        }
+      });
+  notify: Restart polkit
+
+- name: Ensure local AppArmor abstractions directory exists
+  ansible.builtin.file:
+    path: /etc/apparmor.d/local/abstractions
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Allow QEMU domains to access libvirt storage pool
+  ansible.builtin.blockinfile:
+    path: /etc/apparmor.d/local/abstractions/libvirt-qemu
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED LIBVIRT STORAGE"
+    block: |
+      {{ libvirt_pool_path }}/ r,
+      {{ libvirt_pool_path }}/** rwk,
+  notify:
+    - Reload AppArmor
+    - Restart libvirtd
+
+- name: Flush handlers
   ansible.builtin.meta: flush_handlers
 
 - name: Configure host bridge for VM networking

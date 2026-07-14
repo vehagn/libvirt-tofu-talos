@@ -1,0 +1,7 @@
+---
+- name: Prepare hypervisor with ansible service account
+  hosts: hypervisors
+  become: true
+
+  roles:
+    - prepare_host

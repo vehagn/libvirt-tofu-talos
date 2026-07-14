@@ -1,0 +1,3 @@
+---
+prepare_host_user: ansible
+prepare_host_ssh_public_keys: []

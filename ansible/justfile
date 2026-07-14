@@ -14,6 +14,10 @@ configure:
     envsubst '${HYPERVISOR_HOST} ${HYPERVISOR_USER}' < inventory.yaml > inventory.local.yaml
     @echo "Created inventory.local.yaml"
 
-# Bootstrap the hypervisor with Ansible (pass extra args e.g. --check for dry run)
-bootstrap *args:
+# Create ansible service account on the hypervisor (run as root/initial user, e.g. --user root -k)
+prepare-host *args:
+    ansible-playbook -i {{ansible_inventory}} prepare-host.yaml {{args}}
+
+# Configure libvirt, QEMU, AppArmor, and bridge networking on the hypervisor
+configure-libvirt *args:
     ansible-playbook -i {{ansible_inventory}} site.yaml {{args}}

@@ -1,0 +1,41 @@
+cluster = {
+  name               = "talos"
+  vip                = "192.168.1.99"
+  kubernetes_version = "v1.32.0"
+}
+
+# Must match the version deployed in the kvm-talos-xx environments
+talos_version = "v1.12.0"
+
+# Paths to kvm-talos-xx statefiles (relative to this directory).
+# Add entries for each additional hypervisor.
+kvm_talos_state_paths = {
+  kvm-talos-01 = "../kvm-talos-01/terraform.tfstate"
+}
+
+# Override roles for specific VM nodes (default is controlplane for all).
+# vm_node_roles = {
+#   "worker-00" = "worker"
+# }
+
+# Extra per-node Talos config patches for VM nodes (hardware-specific).
+# vm_node_config_patches = {
+#   "gpu-00" = [
+#     <<-YAML
+#       machine:
+#         kernel:
+#           modules:
+#             - name: nvidia
+#     YAML
+#   ]
+# }
+
+# Bare-metal or pre-provisioned nodes not managed by any kvm-talos-xx state.
+# bare_metal_nodes = {
+#   "bm-00" = {
+#     ip              = "192.168.1.50"
+#     role            = "worker"
+#     installer_image = "factory.talos.dev/installer/<schematic-id>:v1.12.0"
+#     config_patches  = []
+#   }
+# }

@@ -1,0 +1,26 @@
+---
+- name: Create ansible service account
+  ansible.builtin.user:
+    name: "{{ prepare_host_user }}"
+    groups: sudo
+    append: true
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Add authorized SSH keys
+  ansible.posix.authorized_key:
+    user: "{{ prepare_host_user }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ prepare_host_ssh_public_keys }}"
+  when: prepare_host_ssh_public_keys | length > 0
+
+- name: Grant passwordless sudo
+  ansible.builtin.copy:
+    content: "{{ prepare_host_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/{{ prepare_host_user }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s

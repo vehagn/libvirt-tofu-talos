@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUNNER_DIR=/opt/actions-runner
+RUNNER_USER=ubuntu
+
+mkdir -p "$RUNNER_DIR"
+chown "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
+
+curl -fsSL -o /tmp/actions-runner.tar.gz \
+  "https://github.com/actions/runner/releases/download/v${runner_version}/actions-runner-linux-x64-${runner_version}.tar.gz"
+tar -xzf /tmp/actions-runner.tar.gz -C "$RUNNER_DIR"
+rm -f /tmp/actions-runner.tar.gz
+
+"$RUNNER_DIR/bin/installdependencies.sh"
+
+sudo -u "$RUNNER_USER" "$RUNNER_DIR/config.sh" \
+  --url "${github_url}" \
+  --token "${runner_token}" \
+  --name "${runner_name}" \
+  --labels "${runner_labels_str}" \
+  --unattended \
+  --replace${runner_group_arg}
+
+cd "$RUNNER_DIR"
+./svc.sh install "$RUNNER_USER"
+./svc.sh start
