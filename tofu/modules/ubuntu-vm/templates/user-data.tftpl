@@ -1,21 +1,21 @@
 #cloud-config
 hostname: ${hostname}
 manage_etc_hosts: true
-
+preserve_hostname: false
+disable_root: true
+ssh_pwauth: false
 users:
   - name: ubuntu
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
-    lock_passwd: ${ user_password == null ? "true" : "false" }
-%{ if user_password != null ~}
-    plain_text_passwd: "${user_password}"
-%{ endif ~}
+    lock_passwd: true
+    ssh_authorized_keys:
+%{ if length(ssh_authorized_keys) > 0 ~}
     ssh_authorized_keys:
 %{ for key in ssh_authorized_keys ~}
       - ${key}
 %{ endfor ~}
-
-
+%{ endif ~}
 %{ if length(write_files) > 0 ~}
 write_files:
 %{ for f in write_files ~}
@@ -23,9 +23,8 @@ write_files:
     owner: ${f.owner}
     permissions: '${f.permissions}'
     content: |
-      ${indent(6, trimspace(f.content))}
+      ${indent(6, chomp(f.content))}
 %{ endfor ~}
-
 %{ endif ~}
 package_update: true
 packages:
@@ -33,9 +32,13 @@ packages:
 %{ for pkg in extra_packages ~}
   - ${pkg}
 %{ endfor ~}
-
+growpart:
+  mode: auto
+  devices:
+    - "/"
+resize_rootfs: true
 runcmd:
-  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now qemu-guest-agent || true
 %{ for cmd in extra_runcmd ~}
   - ${cmd}
 %{ endfor ~}
