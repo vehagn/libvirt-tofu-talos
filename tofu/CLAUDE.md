@@ -12,43 +12,113 @@
 ## Module hierarchy
 
 ```
-modules/libvirt-vm/     Pure domain module — creates a libvirt_domain only
-modules/ubuntu-vm/      Ubuntu wrapper — volumes + cloud-init, calls libvirt-vm
-modules/talos-vm/       Talos VM wrapper — volumes, calls libvirt-vm, virsh IP discovery
-modules/talos-cluster/  Talos bootstrapping only — no libvirt; accepts nodes with pre-discovered IPs
-environments/           Root modules
-talos/                  Legacy standalone Talos root module (kept for existing state)
+modules/networks-catalog/    Data-only module — outputs the standard networks map (bridge, management, isolated)
+modules/libvirt-networks/    Thin resource emitter — creates libvirt_network resources from a networks map
+modules/libvirt-vm/          Pure domain module — creates a libvirt_domain from a networks map
+modules/ubuntu-vm/           Ubuntu wrapper — volumes + cloud-init, calls libvirt-vm
+modules/talos-vm/            Talos VM wrapper — volumes, calls libvirt-vm, virsh IP discovery
+modules/github-runner-vm/    GitHub Actions runner — calls ubuntu-vm with cloud-init runner setup
+modules/talos-cluster/       Talos bootstrapping only — no libvirt; accepts nodes with pre-discovered IPs
+environments/                Root modules
+talos/                       Legacy standalone Talos root module (kept for existing state)
 ```
+
+## Networking model
+
+All three VM modules (`libvirt-vm`, `ubuntu-vm`, `talos-vm`) accept a single `networks` map keyed by
+label — one NIC per entry. The two networks modules produce/normalize that map:
+
+- **`networks-catalog`** returns the standard three-network map (bridge, management, isolated).
+  Shared across environments; site-invariant parts live here (subnets, gateways, DNS servers).
+  Only input is `bridge_interface` (host bridge device).
+- **`libvirt-networks`** takes any networks map, creates `libvirt_network` resources for `nat`/`none`
+  entries (bridge entries are metadata-only — the host bridge is expected to already exist), and
+  returns the map with a `id` field forcing resource-dependency ordering on consumers.
+
+The consumer-facing schema (what `libvirt-vm` and `ubuntu-vm` accept):
+
+```hcl
+map(object({
+  mode        = string                       # "bridge" | "nat" | "none"
+  name        = optional(string, null)       # libvirt network name — required if mode != bridge
+  bridge_name = optional(string, null)       # host bridge device — required if mode == bridge
+  mac_address = optional(string, null)       # per-NIC MAC (DHCP reservations)
+  wait_for_ip = optional(bool, true)         # false skips libvirt's lease-wait on this NIC
+  static_ip   = optional(string, null)       # cloud-init address (CIDR, e.g. "10.0.1.163/16")
+  gateway     = optional(string, null)       # cloud-init default route
+  dns_servers = optional(list(string), [])   # cloud-init nameservers
+}))
+```
+
+`libvirt-vm` consumes `mode`, `name`, `bridge_name`, `mac_address`, `wait_for_ip`, `static_ip`
+(for wait strategy and output fallback). `gateway`/`dns_servers` are passthrough — used only by
+`ubuntu-vm` when it generates cloud-init netplan. Extra fields in a passed-in object (e.g.
+`prefix`, `id` from `networks-catalog`) are silently dropped by the type constraint.
+
+**Wait strategy in libvirt-vm** (governs when `tofu apply` returns):
+
+- Bridge NIC → no wait (libvirt has no view of DHCP on an external bridge).
+- NAT/none NIC without `static_ip` and with `wait_for_ip = true` (default) → lease-wait.
+- NAT/none NIC with `static_ip` → no wait (a statically-configured guest never DHCPs).
+- If nothing lease-waits and some NIC has a `static_ip` → agent-wait on the first such NIC
+  (proof-of-life for bridge-only VMs).
+- `wait_for_ip = false` → never wait (used by `talos-vm` — Talos boots into maintenance mode).
+
+**Environment wiring** (see `environments/dev/dc-ci/` for the reference pattern):
+
+```hcl
+module "catalog" {
+  source           = "../../../modules/networks-catalog"
+  bridge_interface = var.bridge_interface
+}
+
+module "networks" {
+  source   = "../../../modules/libvirt-networks"
+  networks = module.catalog.networks
+}
+```
+
+To add an environment-specific network, merge it in:
+
+```hcl
+module "networks" {
+  source = "../../../modules/libvirt-networks"
+  networks = merge(module.catalog.networks, {
+    datacenter = { mode = "bridge", bridge_name = "br1", prefix = 16, gateway = "10.99.0.1", dns_servers = ["10.99.0.10"] }
+  })
+}
+```
+
+To modify a shared network, edit `modules/networks-catalog/outputs.tofu` — every environment picks it up.
 
 ### `modules/libvirt-vm`
 
-Manages only the libvirt domain. It accepts disk references as typed objects; it does not create volumes or generate
-cloud-init.
+Manages only the libvirt domain. It accepts disk references as typed objects and a networks map;
+it does not create volumes or generate cloud-init.
 
 **Key variables:**
 
-| Variable         | Type                                                                 | Notes                                                                                              |
-|------------------|----------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| `os_disk`        | `object({pool, volume})`                                             | Required. Attached as `vda`.                                                                       |
-| `cloudinit_disk` | `object({pool, volume})` or `null`                                   | Attached as `hda` cdrom; null = no cloud-init.                                                     |
-| `extra_disks`    | `list(object({pool, volume}))`                                       | Attached as `vdb`, `vdc`, … in list order.                                                         |
-| `interfaces`     | `list(object({network_name?, bridge?, mac_address?, wait_for_ip?}))` | Exactly one of `network_name` or `bridge` per entry (validated). `wait_for_ip` defaults to `true`. |
+| Variable         | Type                               | Notes                                                                             |
+|------------------|------------------------------------|-----------------------------------------------------------------------------------|
+| `os_disk`        | `object({pool, volume})`           | Required. Attached as `vda`.                                                      |
+| `cloudinit_disk` | `object({pool, volume})` or `null` | Attached as `hda` cdrom; null = no cloud-init.                                    |
+| `extra_disks`    | `list(object({pool, volume}))`     | Attached as `vdb`, `vdc`, … in list order.                                        |
+| `networks`       | `map(object({...}))`               | One NIC per entry, alphabetical key order. See the Networking model section.      |
+| `cpu_mode`       | `string` or `null`                 | KVM CPU mode (e.g. `host-passthrough`). Null uses the libvirt default.            |
 
 Disk device names (`vdb`, `vdc`, …) are assigned by position in the `extra_disks` list — order is stable, so callers
-must not reorder entries after first apply.
+must not reorder entries after first apply. NIC device names (`enp0s2`, `enp0s3`, …) are assigned in alphabetical
+order of the `networks` map keys.
 
-IP discovery always reads from the QEMU guest agent (`source = "agent"`), so `qemu-guest-agent` must be running in the
-guest. The `data.libvirt_domain_interface_addresses` resource is unconditional; it returns all interface IPs after the
-domain is running.
+IP discovery uses the QEMU guest agent (`source = "agent"`) when nothing lease-waits, and lease info otherwise —
+selected automatically from the network configuration. `qemu-guest-agent` must be running in the guest for the agent
+source. Per-interface details (observed IPs, MAC, `static_ip_detected`) are on `network_interfaces` in the output.
 
 **Do not expose the disk driver config** (`name = "qemu"`, `type = "qcow2"`, `cache = "none"`). It is a consequence of
 the qcow2 volume format and hardcoding it prevents the caller from setting an inconsistent type.
 
-**Recent additions to `modules/libvirt-vm`:**
-
-- `cpu_mode` variable (optional, default `null`) — sets KVM CPU mode (e.g. `host-passthrough`)
-- `uuid` output — exposes the libvirt domain UUID (unknown until apply)
-- `mac_address` is now wired through to the domain interface (was declared but unused)
+**Outputs:** `ip_addresses` (bridge-first, includes static_ip fallbacks), `primary_ip_address`, `network_interfaces`
+(per-interface metadata + observed IPs + `static_ip_detected` boolean), `name`, `uuid`.
 
 ### `modules/ubuntu-vm`
 
@@ -57,7 +127,12 @@ Owns all storage and cloud-init for Ubuntu VMs:
 - `libvirt_volume.os` — OS disk, sized to `os_disk_size_gb`, sourced from `base_image_source` URL
 - `libvirt_volume.extra` — one per entry in `extra_disks` (type `list(object({name, size_gb, pool?}))`)
 - `libvirt_cloudinit_disk` + `libvirt_volume.cloudinit` — rendered from templates in `templates/`
-- Calls `module.vm` (libvirt-vm) with assembled `{pool, volume}` references
+- Calls `module.vm` (libvirt-vm) with assembled `{pool, volume}` references and the same `networks` map
+
+**Networks:** `ubuntu-vm` accepts the same `networks` map shape as `libvirt-vm` (see Networking model). Per-network
+`static_ip`, `gateway`, and `dns_servers` are used to render cloud-init netplan. The first bridge-mode entry (or the
+first entry alphabetically if no bridge) becomes the "primary" — it inherits DHCP routes and DNS when it has no
+static_ip; DHCP on other interfaces suppresses route/DNS propagation via netplan's `dhcp4-overrides`.
 
 **Templates** (in `modules/ubuntu-vm/templates/`):
 
@@ -65,7 +140,7 @@ Owns all storage and cloud-init for Ubuntu VMs:
 |------------------------|-----------------------------------------------------------------------------------------|
 | `user-data.tftpl`      | Creates `ubuntu` user, injects SSH keys, installs `qemu-guest-agent` + `extra_packages` |
 | `meta-data.tftpl`      | Sets `instance-id` and `local-hostname`                                                 |
-| `network-config.tftpl` | Netplan static IP config; rendered only when `static_ip` is set                         |
+| `network-config.tftpl` | Netplan config per interface, static IP or DHCP driven by `networks[*].static_ip`       |
 
 The `extra_packages` variable (list of strings, default `[]`) lets callers install additional packages at first boot.
 This is the extension point for purpose-specific VMs — e.g. an `nginx-vm` wrapper would call `ubuntu-vm` with
@@ -76,6 +151,41 @@ This is the extension point for purpose-specific VMs — e.g. an `nginx-vm` wrap
 **Extra disk ordering:** `extra_disks` in `ubuntu-vm` is `list(object({name, size_gb, pool?}))`. The `name` field is
 used for volume naming only. Volumes are passed to `libvirt-vm` preserving the original list order so device
 assignments (`vdb`, `vdc`, …) are stable.
+
+### `modules/libvirt-networks`
+
+Thin resource emitter. Takes a `networks` map, creates `libvirt_network` for `nat`/`none` entries, and returns the
+map with an `id` field wired to the created resource (or `null` for bridges). Bridge-mode entries are metadata-only —
+the host bridge must already exist on the hypervisor.
+
+**Input schema** (a superset of the consumer schema, adds creation-time fields for `libvirt_network`):
+
+```hcl
+map(object({
+  mode        = string                        # "bridge" | "nat" | "none"
+  bridge_name = optional(string, null)        # required for bridge; also settable on nat modes to name the libvirt bridge
+  address     = optional(string, null)        # e.g. "172.20.0.1"
+  prefix      = optional(number, null)        # e.g. 24
+  gateway     = optional(string, null)        # defaults to address if unset in the output
+  dns_servers = optional(list(string), [])
+  dhcp_start  = optional(string, null)        # both dhcp_start and dhcp_end required to enable DHCP
+  dhcp_end    = optional(string, null)
+}))
+```
+
+### `modules/networks-catalog`
+
+Data-only module (no resources, no provider dependency). Outputs a standard three-network map:
+
+| Key          | Mode     | Purpose                                                                |
+|--------------|----------|------------------------------------------------------------------------|
+| `bridge`     | `bridge` | Host bridge attachment; `bridge_name` from `var.bridge_interface`.     |
+| `management` | `nat`    | libvirt-managed NAT subnet with DHCP (172.20.0.0/24).                  |
+| `isolated`   | `none`   | Host-only network with DHCP but no NAT (192.168.20.0/24).              |
+
+The catalog is designed to be passed straight to `libvirt-networks.networks`, or merged with per-environment
+additions/overrides. Site-invariant defaults (subnets, gateways, DNS servers) live in `outputs.tofu` — edit there to
+change the fleet-wide catalog.
 
 ### `modules/talos-vm`
 
@@ -172,60 +282,112 @@ kvm_talos_state_paths = {
 
 ## Environment structure
 
+Two patterns exist in the tree; new environments should use the catalog pattern.
+
+**Catalog pattern (recommended, e.g. `dc-ci`)** — networks come from the shared `networks-catalog`
+module, VMs get per-NIC config via a `networks` map:
+
 ```
-environments/
-└── <env-name>/
-    └── <hypervisor-hostname>/    ← one OpenTofu root module per hypervisor
-        ├── versions.tofu         provider + required_version
-        ├── variables.tofu        libvirt_uri, pool_path, bridge_interface, ssh_authorized_keys, vms
-        ├── pool.tofu             libvirt_pool.dev
-        ├── networks.tofu         management (nat), isolated (none), bridge
-        ├── main.tofu             module "ubuntu" { for_each = var.vms }
-        ├── outputs.tofu          vms = { name => { ip, ssh } }
-        ├── justfile
-        └── terraform.tfvars.example
+environments/<env-name>/<name>/
+├── versions.tofu               required_version + provider "libvirt"
+├── variables.tofu              libvirt_uri, pool_path, bridge_interface, ssh_authorized_keys, ubuntu_vms
+├── main.tofu                   libvirt_pool + module "catalog" + module "networks" + module "ubuntu"
+├── outputs.tofu                vms = { name => { ip_addresses, ssh, by_network, ... } }
+├── justfile
+└── terraform.tfvars.example
 ```
 
-Each hypervisor directory is an independent OpenTofu state. This avoids the OpenTofu constraint that provider aliases
-must be static — adding a second hypervisor means creating `environments/dev/kvm-02/` rather than using provider
-aliases.
+**Local-network pattern (legacy, e.g. `kvm-01`)** — networks defined inline as `libvirt_network`
+resources; VMs pick a single network by name. Kept for existing state; do not use as a template
+for new environments.
 
-### The `vms` variable
+```
+environments/dev/kvm-01/
+├── versions.tofu
+├── variables.tofu              libvirt_uri, pool_path, bridge_interface, ubuntu_vms (with network_name scalar)
+├── networks.tofu               inline libvirt_network resources + local.networks map for ubuntu-vm
+├── ubuntu.tofu / github-runner.tofu
+├── outputs.tofu
+└── justfile
+```
+
+Each root module is an independent OpenTofu state. Adding a second hypervisor means creating
+`environments/dev/<name>/` rather than using provider aliases (which must be static).
+
+### The `ubuntu_vms` variable (catalog pattern)
 
 ```hcl
-variable "vms" {
+variable "ubuntu_vms" {
   type = map(object({
-    memory_mb = optional(number, 2048)
-    vcpu_count = optional(number, 2)
+    memory_mb       = optional(number, 2048)
+    vcpu_count      = optional(number, 2)
     os_disk_size_gb = optional(number, 20)
-    extra_packages = optional(list(string), [])
-    network_name = optional(string, "management")  # must match a libvirt_network name in this root module
+    extra_packages  = optional(list(string), [])
+    extra_disks     = optional(list(object({ name = string, size_gb = number, pool = optional(string, null) })), [])
+    networks = map(object({
+      static_ip   = optional(string, null)
+      gateway     = optional(string, null)
+      dns_servers = optional(list(string), null)
+      mac_address = optional(string, null)
+      wait_for_ip = optional(bool, null)
+    }))
   }))
   default = {}
 }
 ```
 
-Map keys become VM names. Example:
+Each VM's `networks` map selects entries from the catalog by key. Fields left `null` pass through
+to catalog defaults. Example:
 
 ```hcl
-vms = {
-  "ubuntu-01" = {}
-  "web-01" = { extra_packages = ["nginx"] }
-  "db-01" = { memory_mb = 4096, os_disk_size_gb = 50, network_name = "isolated" }
+ubuntu_vms = {
+  ubuntu-01 = {
+    networks = {
+      bridge     = { static_ip = "10.0.1.163/16" }
+      management = {}
+    }
+  }
+  ubuntu-02 = {
+    memory_mb = 4096
+    networks = {
+      bridge     = { static_ip = "10.0.1.164/16", mac_address = "52:54:00:12:34:56" }
+      management = {}
+    }
+  }
 }
 ```
 
-### Networks
+The environment's `main.tofu` merges each VM's overrides into the catalog entry (nulls stripped
+so catalog defaults survive):
 
-Three networks are defined per hypervisor root module:
+```hcl
+locals {
+  vm_networks = {
+    for vm_name, vm_cfg in var.ubuntu_vms :
+    vm_name => {
+      for network_name, overrides in vm_cfg.networks :
+      network_name => merge(
+        module.networks.networks[network_name],
+        { for k, v in overrides : k => v if v != null }
+      )
+    }
+  }
+}
+```
 
-| Resource                     | Name         | Mode     | Subnet           |
-|------------------------------|--------------|----------|------------------|
-| `libvirt_network.management` | `management` | `nat`    | 192.168.100.0/24 |
-| `libvirt_network.isolated`   | `isolated`   | `none`   | 10.100.0.0/24    |
-| `libvirt_network.bridge`     | `bridge`     | `bridge` | host bridge      |
+### Networks (catalog pattern)
 
-`bridge_interface` variable sets the host bridge device name (default `br0`).
+Three networks are provided by `modules/networks-catalog`, shared across all catalog-pattern
+environments:
+
+| Key          | Mode     | Subnet           | Purpose                                         |
+|--------------|----------|------------------|-------------------------------------------------|
+| `bridge`     | `bridge` | host LAN (10.0.1.0/16 defaults) | Attach to a physical LAN via the host bridge.   |
+| `management` | `nat`    | 172.20.0.0/24    | libvirt-managed NAT with DHCP.                  |
+| `isolated`   | `none`   | 192.168.20.0/24  | Host-only isolated network with DHCP.           |
+
+`bridge_interface` sets the host bridge device (default `br0`). To evolve the catalog fleet-wide,
+edit `modules/networks-catalog/outputs.tofu`.
 
 ---
 

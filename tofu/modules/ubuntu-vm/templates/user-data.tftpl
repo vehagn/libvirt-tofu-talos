@@ -9,7 +9,6 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     lock_passwd: true
-    ssh_authorized_keys:
 %{ if length(ssh_authorized_keys) > 0 ~}
     ssh_authorized_keys:
 %{ for key in ssh_authorized_keys ~}

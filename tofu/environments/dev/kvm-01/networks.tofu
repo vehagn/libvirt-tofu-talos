@@ -43,3 +43,22 @@ resource "libvirt_network" "bridge" {
     name = var.bridge_interface
   }
 }
+
+# Networks in the shape ubuntu-vm/libvirt-vm expects — a map keyed by label.
+# Callers reference an entry by name (e.g. local.networks["management"]).
+locals {
+  networks = {
+    management = {
+      mode = "nat"
+      name = libvirt_network.management.name
+    }
+    isolated = {
+      mode = "none"
+      name = libvirt_network.isolated.name
+    }
+    bridge = {
+      mode        = "bridge"
+      bridge_name = var.bridge_interface
+    }
+  }
+}

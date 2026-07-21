@@ -1,43 +1,51 @@
 locals {
-  hostname = coalesce(var.hostname, var.name)
+  hostname      = coalesce(var.hostname, var.name)
   network_names = keys(var.networks)
-  # Select the primary network name, either from the explicit variable or the first network in the list.
-  effective_primary_network_name = coalesce(
-    var.primary_network_name,
+
+  # The primary network is the interface that inherits DHCP routes/DNS when it doesn't have a
+  # static IP configured — otherwise its own gateway/dns_servers apply. Bridges are preferred
+  # since they typically sit on the physical LAN; falls back to the first network alphabetically.
+  primary_network_name = try(
+    [for n in local.network_names : n if var.networks[n].mode == "bridge"][0],
     local.network_names[0]
   )
-  primary_interface_index = index(local.network_names, local.effective_primary_network_name)
-  # qemu/libvirt Ubuntu guest names are typically enp0s2, enp0s3, ...
-  primary_interface_name    = "enp0s${local.primary_interface_index + 2}"
-  secondary_interface_names = [for idx, _ in local.network_names : "enp0s${idx + 2}" if idx != local.primary_interface_index]
-  primary_network = try(var.networks[local.effective_primary_network_name], {})
+
+  # Alphabetical key order matches libvirt attachment order — enp0s2 is the first network, enp0s3 the second, etc.
+  cloud_init_interfaces = [
+    for idx, name in local.network_names : {
+      device      = "enp0s${idx + 2}"
+      is_primary  = name == local.primary_network_name
+      static_ip   = var.networks[name].static_ip
+      gateway     = var.networks[name].gateway
+      dns_servers = var.networks[name].dns_servers
+    }
+  ]
 }
+
 resource "libvirt_volume" "os" {
   name     = "${var.name}-os.qcow2"
   pool     = var.pool_name
   capacity = var.os_disk_size_gb * 1024 * 1024 * 1024
   target = {
-    format = {
-      type = "qcow2"
-    }
+    format = { type = "qcow2" }
   }
   create = {
-    content = {
-      url = var.base_image_source
-    }
+    content = { url = var.base_image_source }
   }
 }
+
 resource "libvirt_volume" "extra" {
   for_each = { for d in var.extra_disks : d.name => d }
   name     = "${var.name}-${each.key}.qcow2"
   pool     = coalesce(each.value.pool, var.pool_name)
   capacity = each.value.size_gb * 1024 * 1024 * 1024
   target = {
-    format = {
-      type = "qcow2"
-    }
+    format = { type = "qcow2" }
   }
 }
+
+# libvirt_cloudinit_disk (v0.9) only writes to the "default" pool, so we wrap the generated ISO
+# in a libvirt_volume placed in the target pool.
 resource "libvirt_cloudinit_disk" "init" {
   name = "${var.name}-cloudinit.iso"
   user_data = templatefile("${path.module}/templates/user-data.tftpl", {
@@ -52,28 +60,26 @@ resource "libvirt_cloudinit_disk" "init" {
     hostname    = local.hostname
   })
   network_config = templatefile("${path.module}/templates/network-config.tftpl", {
-    primary_interface_name    = local.primary_interface_name
-    secondary_interface_names = local.secondary_interface_names
-    static_ip                 = var.static_ip_address
-    gateway                   = try(local.primary_network.gateway, null)
-    dns_servers               = try(local.primary_network.dns_servers, [])
+    interfaces = local.cloud_init_interfaces
   })
 }
+
 resource "libvirt_volume" "cloudinit" {
   name = "${var.name}-cloudinit.iso"
   pool = var.pool_name
   create = {
-    content = {
-      url = libvirt_cloudinit_disk.init.path
-    }
+    content = { url = libvirt_cloudinit_disk.init.path }
   }
 }
+
 module "vm" {
   source = "../libvirt-vm"
+
   name       = var.name
   hostname   = local.hostname
   memory_mb  = var.memory_mb
   vcpu_count = var.vcpu_count
+
   os_disk = {
     pool   = libvirt_volume.os.pool
     volume = libvirt_volume.os.name
@@ -89,8 +95,7 @@ module "vm" {
       volume = libvirt_volume.extra[disk.name].name
     }
   ]
-  networks = var.networks
-  expected_static_ip                  = var.static_ip_address
-  expected_static_ip_interface_label  = var.static_ip_address != null ? local.effective_primary_network_name : null
+
+  networks                            = var.networks
   static_ip_detection_timeout_seconds = var.static_ip_detection_timeout_seconds
 }

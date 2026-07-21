@@ -15,13 +15,9 @@ module "vm" {
   base_image_source = var.base_image_source
   os_disk_size_gb   = var.os_disk_size_gb
   extra_disks       = var.extra_disks
-  interfaces        = var.interfaces
+  networks          = var.networks
 
   ssh_authorized_keys = var.ssh_authorized_keys
-  user_password       = var.user_password
-  static_ip           = var.static_ip
-  gateway             = var.gateway
-  dns_servers         = var.dns_servers
   extra_packages      = var.extra_packages
 
   write_files = [{

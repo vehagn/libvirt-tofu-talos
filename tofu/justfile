@@ -7,6 +7,7 @@ mod talos "talos/justfile"
 mod dev "environments/dev/kvm-01/justfile"
 mod dev-kvm-talos-01 "environments/dev/kvm-talos-01/justfile"
 mod dev-talos "environments/dev/talos/justfile"
+mod dev-dc-ci "environments/dev/dc-ci/justfile"
 
 [private]
 default:

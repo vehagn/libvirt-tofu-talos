@@ -11,22 +11,29 @@ bare-metal — all managed from a single `talos apply`.
 ```mermaid
 graph TD
     subgraph modules["modules/"]
-        LV["libvirt-vm\nPure libvirt domain"]
-        UV["ubuntu-vm\nUbuntu + cloud-init"]
+        NC["networks-catalog\nStandard networks map\n(data-only)"]
+        LN["libvirt-networks\nlibvirt_network resources\nfrom a networks map"]
+        LV["libvirt-vm\nPure libvirt domain\naccepts networks map"]
+        UV["ubuntu-vm\nUbuntu + cloud-init\npasses networks through"]
         TV["talos-vm\nTalos OS overlay\n+ virsh IP discovery"]
         GR["github-runner-vm\nGitHub Actions runner"]
         TC["talos-cluster\nTalos bootstrapping\n(no libvirt)"]
     end
 
     subgraph envs["environments/dev/"]
-        KVM01["kvm-01\nUbuntu VMs\nGitHub runners"]
+        DCCI["dc-ci\nUbuntu VMs\ncatalog pattern"]
+        KVM01["kvm-01\nUbuntu VMs\nGitHub runners\nlocal-network pattern"]
         KVMT01["kvm-talos-01\nTalos VM nodes\nper-schematic images"]
         TALOS["talos\nCluster bootstrapping"]
     end
 
+    NC -->|networks map| LN
     UV -->|calls| LV
     GR -->|calls| UV
     TV -->|calls| LV
+    DCCI -->|calls| NC
+    DCCI -->|calls| LN
+    DCCI -->|calls| UV
     KVM01 -->|calls| UV
     KVM01 -->|calls| GR
     KVMT01 -->|calls many| TV
@@ -376,18 +383,51 @@ interfaces (VIP, Cilium, etc.) alongside the physical NIC. The virsh script filt
 
 ---
 
-## Ubuntu VMs (`environments/dev/kvm-01`)
+## Ubuntu VMs
 
-Ubuntu 24.04 LTS VMs for general-purpose workloads (dev boxes, CI runners, etc.) are managed in
-`environments/dev/kvm-01/` via the `ubuntu-vm` module, which handles cloud-init, SSH key injection, static IP
-configuration, and extra package installation.
+Two environments run Ubuntu 24.04 LTS VMs; they differ only in how they source their networks.
+
+### `environments/dev/dc-ci` (catalog pattern — recommended)
+
+Uses the shared `networks-catalog` module for standard networks (bridge, management, isolated) and the
+`libvirt-networks` module to materialize `libvirt_network` resources. Each VM's `networks` map selects
+catalog entries and can override per-NIC config (static_ip, mac_address, ...).
+
+```hcl
+# dc-ci/terraform.tfvars
+bridge_interface = "br0"
+
+ubuntu_vms = {
+  ubuntu-01 = {
+    networks = {
+      bridge = { static_ip = "10.0.1.163/16" }
+      management = {}
+    }
+  }
+  web-01 = {
+    extra_packages = ["nginx"]
+    networks = {
+      bridge = { static_ip = "10.0.1.164/16", mac_address = "52:54:00:11:22:33" }
+      management = {}
+    }
+  }
+}
+```
+
+Unset fields (`static_ip`, `mac_address`, etc.) fall through to the catalog defaults. To evolve the fleet-wide
+catalog (subnets, gateways, DNS), edit `modules/networks-catalog/outputs.tofu`.
+
+### `environments/dev/kvm-01` (local-network pattern — legacy)
+
+Networks defined inline as `libvirt_network` resources. Each VM picks one via a `network_name` scalar. Kept for
+existing state; new environments should follow the `dc-ci` pattern.
 
 ```hcl
 # kvm-01/terraform.tfvars
 ubuntu_vms = {
   "dev-01" = { memory_mb = 4096 }
   "web-01" = { extra_packages = ["nginx"] }
-  "db-01" = { memory_mb = 8192, os_disk_size_gb = 50 }
+  "db-01" = { memory_mb = 8192, os_disk_size_gb = 50, network_name = "isolated" }
 }
 
 github_runners = {
@@ -399,15 +439,21 @@ github_runners = {
 }
 ```
 
-| `ubuntu-vm` variable | Default | Description                                           |
-|----------------------|---------|-------------------------------------------------------|
-| `memory_mb`          | `2048`  | RAM in MiB                                            |
-| `vcpu_count`         | `2`     | Virtual CPUs                                          |
-| `os_disk_size_gb`    | `20`    | Root disk in GiB                                      |
-| `extra_packages`     | `[]`    | apt packages to install at first boot                 |
-| `static_ip`          | `null`  | CIDR notation (e.g. `192.168.1.10/24`); `null` = DHCP |
-| `write_files`        | `[]`    | Files to create via cloud-init `write_files`          |
-| `extra_runcmd`       | `[]`    | Shell commands appended to cloud-init `runcmd`        |
+### `ubuntu-vm` module variables
+
+| Variable          | Default | Description                                                                |
+|-------------------|---------|----------------------------------------------------------------------------|
+| `memory_mb`       | `2048`  | RAM in MiB                                                                 |
+| `vcpu_count`      | `2`     | Virtual CPUs                                                               |
+| `os_disk_size_gb` | `20`    | Root disk in GiB                                                           |
+| `extra_packages`  | `[]`    | apt packages to install at first boot                                      |
+| `networks`        | —       | Map of NICs; per-entry `static_ip` (CIDR), `gateway`, `dns_servers`, `mac_address`, `wait_for_ip` |
+| `write_files`     | `[]`    | Files to create via cloud-init `write_files`                               |
+| `extra_runcmd`    | `[]`    | Shell commands appended to cloud-init `runcmd`                             |
+
+The first bridge-mode entry in `networks` (or the first entry alphabetically if none is a bridge) is the "primary"
+NIC — it receives the default route and DNS from either its own `gateway`/`dns_servers` fields or from DHCP.
+Non-primary NICs get DHCP with `use-routes: false, use-dns: false` so they don't fight for the default route.
 
 ---
 

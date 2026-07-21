@@ -1,23 +1,17 @@
-output "network_catalog" {
-  description = "Effective network catalog (module defaults merged with extra_network_catalog)."
-  value       = local.effective_network_catalog
-}
 output "networks" {
-  description = "Configured networks keyed by name (bridge-mode entries are metadata-only and not managed as libvirt networks)."
+  description = <<-EOT
+    Configured networks in the shape libvirt-vm and ubuntu-vm consume. The `id` field is null for
+    bridge-mode entries (no libvirt_network resource); for other modes it references the created
+    resource so consumers implicitly depend on its creation.
+  EOT
   value = {
-    for network_name, cfg in local.effective_network_catalog : network_name => {
-      id          = try(libvirt_network.network[network_name].id, null)
-      name        = try(libvirt_network.network[network_name].name, network_name)
+    for name, cfg in var.networks : name => {
       mode        = cfg.mode
+      name        = name
       bridge_name = cfg.bridge_name
-      prefix      = cfg.prefix
-      gateway     = cfg.gateway
+      gateway     = coalesce(cfg.gateway, cfg.address)
       dns_servers = cfg.dns_servers
-      subnet      = cfg.address != null ? "${cfg.address}/${cfg.prefix}" : null
-      dhcp_range  = cfg.dhcp_start != null ? {
-        start = cfg.dhcp_start
-        end   = cfg.dhcp_end
-      } : null
+      id          = try(libvirt_network.network[name].id, null)
     }
   }
 }

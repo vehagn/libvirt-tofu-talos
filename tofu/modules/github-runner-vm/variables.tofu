@@ -48,52 +48,24 @@ variable "extra_disks" {
   default = []
 }
 
-variable "interfaces" {
-  description = "Network interfaces; each must specify exactly one of network_name or bridge"
-  type = list(object({
-    network_name = optional(string, null)
-    bridge       = optional(string, null)
-    mac_address  = optional(string, null)
-    wait_for_ip  = optional(bool, true)
+variable "networks" {
+  description = "Network attachments; passed through to ubuntu-vm. See ubuntu-vm.networks."
+  type = map(object({
+    mode        = string
+    name        = optional(string, null)
+    bridge_name = optional(string, null)
+    mac_address = optional(string, null)
+    wait_for_ip = optional(bool, true)
+    static_ip   = optional(string, null)
+    gateway     = optional(string, null)
+    dns_servers = optional(list(string), [])
   }))
-  validation {
-    condition = alltrue([
-      for iface in var.interfaces :
-      (iface.network_name != null) != (iface.bridge != null)
-    ])
-    error_message = "Each interface must have exactly one of network_name or bridge set."
-  }
 }
 
 variable "ssh_authorized_keys" {
   description = "SSH public keys to authorize for the ubuntu user"
   type        = list(string)
   default     = []
-}
-
-variable "user_password" {
-  description = "Password for the ubuntu user; null disables password login"
-  type        = string
-  default     = null
-  sensitive   = true
-}
-
-variable "static_ip" {
-  description = "Static IP in CIDR notation (e.g. 192.168.1.100/24); null uses DHCP"
-  type        = string
-  default     = null
-}
-
-variable "gateway" {
-  description = "Default gateway IP; required when static_ip is set"
-  type        = string
-  default     = null
-}
-
-variable "dns_servers" {
-  description = "DNS server IPs; used when static_ip is set"
-  type        = list(string)
-  default     = ["1.1.1.1", "8.8.8.8"]
 }
 
 variable "extra_packages" {

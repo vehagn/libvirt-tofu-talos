@@ -21,108 +21,93 @@ variable "vcpu_count" {
   default     = 1
 }
 
-variable "os_disk" {
-  description = "OS disk volume reference (vda)"
-  type = object({
-    pool   = string
-    volume = string
-  })
-}
-
-variable "cloudinit_disk" {
-  description = "Cloud-init ISO volume reference; null attaches no cloud-init cdrom"
-  type = object({
-    pool   = string
-    volume = string
-  })
-  default = null
-}
-
-variable "cpu_mode" {
-  description = "CPU mode (e.g. host-passthrough, host-model). Null uses the libvirt default."
+variable "pool_name" {
+  description = "Libvirt pool name for all volumes"
   type        = string
-  default     = null
+}
+
+variable "os_disk_size_gb" {
+  description = "OS disk size in GiB"
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.os_disk_size_gb > 0
+    error_message = "os_disk_size_gb must be positive."
+  }
+}
+
+variable "base_image_source" {
+  description = "URL for the base Ubuntu cloud image (qcow2)"
+  type        = string
+  default     = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+}
+
+variable "ssh_authorized_keys" {
+  description = "SSH public keys to inject into the ubuntu user"
+  type        = list(string)
+  default     = []
+}
+
+variable "extra_packages" {
+  description = "Additional APT packages to install at first boot"
+  type        = list(string)
+  default     = []
+}
+
+variable "write_files" {
+  description = "Files to write via cloud-init write_files directive"
+  type = list(object({
+    path        = string
+    content     = string
+    owner       = optional(string, "root:root")
+    permissions = optional(string, "0644")
+  }))
+  default = []
+}
+
+variable "extra_runcmd" {
+  description = "Additional runcmd entries executed at first boot"
+  type        = list(string)
+  default     = []
 }
 
 variable "extra_disks" {
-  description = "Additional data disk volume references, attached as vdb, vdc, ..."
+  description = "Additional data disks to attach as vdb, vdc, ...; name is used for volume naming only"
   type = list(object({
-    pool   = string
-    volume = string
+    name    = string
+    size_gb = number
+    pool    = optional(string, null)
   }))
   default = []
-}
-
-variable "interfaces" {
-  description = "Explicit interface definitions. If empty, interfaces are derived from networks."
-  type = list(object({
-    label        = string
-    network_name = optional(string, null)
-    bridge       = optional(string, null)
-    mac_address  = optional(string, null)
-    wait_for_ip  = optional(bool, true)
-  }))
-  default = []
-
-  validation {
-    condition = alltrue([
-      for iface in var.interfaces :
-      (iface.network_name != null) != (iface.bridge != null)
-      ])
-    error_message = "Each interface must have exactly one of network_name or bridge set."
-  }
-
-  validation {
-    condition     = length(distinct([for iface in var.interfaces : iface.label])) == length(var.interfaces)
-    error_message = "Interface labels must be unique."
-  }
-
-  validation {
-    condition     = length(var.interfaces) > 0 || length(var.networks) > 0
-    error_message = "Configure at least one interface via interfaces or networks."
-  }
 }
 
 variable "networks" {
-  description = "module.libvirt-networks.networks output map."
+  description = <<-EOT
+    Network attachments keyed by label — one NIC per entry. Pass module.libvirt-networks.networks
+    directly, or a hand-built map. Per-entry static_ip (CIDR), gateway, and dns_servers configure
+    cloud-init; the first bridge-mode entry (or the first entry alphabetically if no bridge) also
+    receives DHCP-provided routes and DNS when it has no static_ip.
+  EOT
   type = map(object({
-    name        = string
     mode        = string
+    name        = optional(string, null)
     bridge_name = optional(string, null)
+    mac_address = optional(string, null)
+    wait_for_ip = optional(bool, true)
+    static_ip   = optional(string, null)
     gateway     = optional(string, null)
     dns_servers = optional(list(string), [])
   }))
-  default = {}
-}
-
-variable "expected_static_ip" {
-  description = "Expected static IPv4 (CIDR allowed, e.g. 10.0.1.163/16). Null disables static IP detection."
-  type        = string
-  default     = null
-}
-
-variable "expected_static_ip_interface_label" {
-  description = "Interface label to probe for expected_static_ip. Required when expected_static_ip is set."
-  type        = string
-  default     = null
 
   validation {
-    condition = (
-    var.expected_static_ip == null && var.expected_static_ip_interface_label == null
-    ) || (
-    var.expected_static_ip != null &&
-    var.expected_static_ip_interface_label != null &&
-    contains(
-      distinct(concat([for iface in var.interfaces : iface.label], keys(var.networks))),
-      var.expected_static_ip_interface_label
-    )
-    )
-    error_message = "When expected_static_ip is set, expected_static_ip_interface_label must match one of interfaces[*].label or networks keys."
+    condition     = length(var.networks) > 0
+    error_message = "At least one network must be provided."
   }
 }
 
 variable "static_ip_detection_timeout_seconds" {
-  description = "Timeout for guest-agent static IP detection on the selected interface."
+  description = "Seconds to wait for the guest agent to report the static IP (only when no lease-wait applies)"
   type        = number
   default     = 300
 

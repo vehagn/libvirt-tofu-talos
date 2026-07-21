@@ -7,14 +7,10 @@ output "primary_ip_address" {
   value       = module.vm.primary_ip_address
 }
 output "network_interfaces" {
-  description = "Per-interface network details and IPv4 addresses (bridge-first ordering)"
+  description = "Per-interface details with observed IPv4 addresses, static_ip, static_ip_detected, gateway, dns_servers (bridge-first ordering)"
   value       = module.vm.network_interfaces
 }
 output "name" {
   description = "VM name"
   value       = module.vm.name
-}
-output "static_ip_detected" {
-  description = "Static IP detection status from libvirt-vm (null when detection is disabled)"
-  value       = module.vm.static_ip_detected
 }

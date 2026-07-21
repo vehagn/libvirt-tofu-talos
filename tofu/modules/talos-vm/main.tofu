@@ -43,15 +43,16 @@ module "vm" {
     }
   ]
 
-  interfaces = [
-    {
-      bridge      = var.bridge
+  # IP discovery is handled below via virsh; libvirt's guest-agent source
+  # returns every Kubernetes-internal interface once kubelet starts.
+  networks = {
+    bridge = {
+      mode        = "bridge"
+      bridge_name = var.bridge
       mac_address = var.mac_address
-      # IP discovery is handled below via virsh; libvirt's guest-agent source
-      # returns every Kubernetes-internal interface once kubelet starts.
       wait_for_ip = false
     }
-  ]
+  }
 }
 
 # Discover the DHCP-assigned IPv4 by polling virsh on the hypervisor over SSH.

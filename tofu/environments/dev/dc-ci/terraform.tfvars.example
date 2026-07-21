@@ -1,0 +1,28 @@
+libvirt_uri = "qemu+ssh://user@hypervisor.example.com/system"
+
+# pool_path = "/var/lib/libvirt/images/pool-0"
+
+# Host bridge device for the default bridge network (mode = "bridge" in libvirt-networks catalog)
+bridge_interface = "br0"
+
+ssh_authorized_keys = [
+  "ssh-ed25519 AAAA... you@host",
+]
+
+# Each VM's `networks` map selects catalog entries by key. Empty override object = use catalog
+# defaults (DHCP, no per-VM MAC). Provide static_ip to configure the address in cloud-init.
+ubuntu_vms = {
+  ubuntu-01 = {
+    networks = {
+      bridge     = { static_ip = "10.0.1.163/16" }
+      management = {}
+    }
+  }
+  # ubuntu-02 = {
+  #   networks = {
+  #     bridge     = { static_ip = "10.0.1.164/16", mac_address = "52:54:00:12:34:56" }
+  #     datacenter = { static_ip = "10.99.0.5/24" }
+  #     management = {}
+  #   }
+  # }
+}

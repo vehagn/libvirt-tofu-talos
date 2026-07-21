@@ -96,13 +96,20 @@ Environments live in `tofu/environments/<env>/`. Each hypervisor is a separate r
 See [tofu/README.md](tofu/README.md) for the full workflow, per-node schematics, multi-hypervisor setup, Ubuntu VM
 configuration, and command reference.
 
-| Module             | Purpose                                                             |
-|--------------------|---------------------------------------------------------------------|
-| `libvirt-vm`       | Bare libvirt domain — disks, network interfaces, no cloud-init      |
-| `ubuntu-vm`        | Ubuntu 24.04 LTS — cloud-init, SSH keys, extra packages             |
-| `talos-vm`         | Talos OS overlay — qcow2 backing image, data disk, virsh IP discovery |
-| `talos-cluster`    | Cluster bootstrapping only — no libvirt; accepts pre-discovered IPs |
-| `github-runner-vm` | GitHub Actions self-hosted runner on Ubuntu                         |
+| Module              | Purpose                                                                     |
+|---------------------|-----------------------------------------------------------------------------|
+| `networks-catalog`  | Data-only — outputs the standard networks map (bridge, management, isolated)|
+| `libvirt-networks`  | Thin emitter — creates `libvirt_network` resources from a networks map      |
+| `libvirt-vm`        | Bare libvirt domain — disks + a `networks` map, no cloud-init               |
+| `ubuntu-vm`         | Ubuntu 24.04 LTS — cloud-init, SSH keys, extra packages, per-NIC static IPs |
+| `talos-vm`          | Talos OS overlay — qcow2 backing image, data disk, virsh IP discovery       |
+| `talos-cluster`     | Cluster bootstrapping only — no libvirt; accepts pre-discovered IPs         |
+| `github-runner-vm`  | GitHub Actions self-hosted runner on Ubuntu                                 |
+
+All VM modules accept a single `networks` map (keyed by label, one NIC per entry) carrying attachment
+info (`mode`, `name`/`bridge_name`, `mac_address`, `wait_for_ip`) and guest-OS hints (`static_ip`,
+`gateway`, `dns_servers`). Environments feed that map from `networks-catalog` (see
+`environments/dev/dc-ci/` for the reference pattern).
 
 For the Talos cluster, apply order is mandatory: `kvm-talos-01` must complete before `talos` (the `talos` environment
 reads `kvm-talos-01`'s statefile via `terraform_remote_state`).
@@ -218,13 +225,16 @@ ansible/
 
 tofu/
   modules/
+    networks-catalog/     Standard networks map (data-only)
+    libvirt-networks/     libvirt_network resources from a networks map
     libvirt-vm/           Bare libvirt domain
     ubuntu-vm/            Ubuntu 24.04 LTS + cloud-init
     talos-vm/             Talos OS overlay + virsh IP discovery
     talos-cluster/        Talos bootstrapping (no libvirt)
     github-runner-vm/     GitHub Actions self-hosted runner
   environments/dev/
-    kvm-01/               Ubuntu VMs + GitHub runners
+    dc-ci/                Ubuntu VMs (catalog pattern — recommended)
+    kvm-01/               Ubuntu VMs + GitHub runners (legacy local-network pattern)
     kvm-talos-01/         Talos VM nodes (pool, per-schematic images, VMs)
     talos/                Talos cluster bootstrapping
   talos/                  Legacy standalone Talos root module (existing state)

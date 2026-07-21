@@ -1,25 +1,26 @@
 version: 2
 renderer: networkd
 ethernets:
-  ${primary_interface_name}:
+%{ for iface in interfaces ~}
+  ${iface.device}:
     match:
-      name: "${primary_interface_name}"
-    set-name: "${primary_interface_name}"
-%{ if static_ip != null ~}
+      name: "${iface.device}"
+    set-name: "${iface.device}"
+%{ if iface.static_ip != null ~}
     dhcp4: false
     dhcp6: false
     optional: true
     addresses:
-      - ${static_ip}
-%{ if gateway != null ~}
+      - ${iface.static_ip}
+%{ if iface.gateway != null ~}
     routes:
       - to: default
-        via: ${gateway}
+        via: ${iface.gateway}
 %{ endif ~}
-%{ if length(dns_servers) > 0 ~}
+%{ if length(iface.dns_servers) > 0 ~}
     nameservers:
       addresses:
-%{ for dns in dns_servers ~}
+%{ for dns in iface.dns_servers ~}
         - ${dns}
 %{ endfor ~}
 %{ endif ~}
@@ -27,16 +28,10 @@ ethernets:
     dhcp4: true
     dhcp6: false
     optional: true
-%{ endif ~}
-%{ for nic in secondary_interface_names ~}
-  ${nic}:
-    match:
-      name: "${nic}"
-    set-name: "${nic}"
-    dhcp4: true
+%{ if !iface.is_primary ~}
     dhcp4-overrides:
       use-routes: false
       use-dns: false
-    dhcp6: false
-    optional: true
+%{ endif ~}
+%{ endif ~}
 %{ endfor ~}

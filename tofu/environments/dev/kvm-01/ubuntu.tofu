@@ -9,6 +9,6 @@ module "ubuntu" {
   os_disk_size_gb = each.value.os_disk_size_gb
   extra_packages  = each.value.extra_packages
 
-  interfaces          = [{ network_name = each.value.network_name }]
+  networks            = { (each.value.network_name) = local.networks[each.value.network_name] }
   ssh_authorized_keys = var.ssh_authorized_keys
 }

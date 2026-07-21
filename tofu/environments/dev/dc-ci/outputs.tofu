@@ -1,12 +1,16 @@
 output "vms" {
-  description = "Bridge-first connection details and network inventory for each Ubuntu VM"
+  description = "Per-VM IP inventory. by_network exposes ip_addresses + static_ip + static_ip_detected per interface."
   value = {
     for name, vm in module.ubuntu : name => {
-      primary_ip         = vm.primary_ip_address
-      ssh                = vm.primary_ip_address != null ? "ssh ubuntu@${vm.primary_ip_address}" : null
-      ip_addresses       = vm.ip_addresses
-      static_ip_detected = vm.static_ip_detected
-      networks           = vm.network_interfaces
+      ip_addresses = vm.ip_addresses
+      ssh          = try("ssh ubuntu@${vm.ip_addresses[0]}", null)
+      by_network = {
+        for iface in vm.network_interfaces : iface.label => {
+          ip_addresses       = iface.ip_addresses
+          static_ip          = iface.static_ip
+          static_ip_detected = iface.static_ip_detected
+        }
+      }
     }
   }
 }

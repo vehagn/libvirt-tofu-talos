@@ -53,76 +53,56 @@ variable "extra_disks" {
   default = []
 }
 
-variable "interfaces" {
-  description = "Explicit interface definitions. If empty, interfaces are derived from networks."
-  type = list(object({
-    label        = string
-    network_name = optional(string, null)
-    bridge       = optional(string, null)
-    mac_address  = optional(string, null)
-    wait_for_ip  = optional(bool, true)
-  }))
-  default = []
-
-  validation {
-    condition = alltrue([
-      for iface in var.interfaces :
-      (iface.network_name != null) != (iface.bridge != null)
-      ])
-    error_message = "Each interface must have exactly one of network_name or bridge set."
-  }
-
-  validation {
-    condition     = length(distinct([for iface in var.interfaces : iface.label])) == length(var.interfaces)
-    error_message = "Interface labels must be unique."
-  }
-
-  validation {
-    condition     = length(var.interfaces) > 0 || length(var.networks) > 0
-    error_message = "Configure at least one interface via interfaces or networks."
-  }
-}
-
 variable "networks" {
-  description = "module.libvirt-networks.networks output map."
+  description = <<-EOT
+    Network attachments keyed by label — one NIC per entry. Bridge-mode entries attach to a host
+    bridge (bridge_name); other modes attach to a libvirt-managed network (name). The static_ip,
+    gateway, and dns_servers fields are guest-OS configuration hints — libvirt-vm uses static_ip
+    for its wait strategy and output fallback; other fields are passthrough for callers like
+    ubuntu-vm that generate cloud-init.
+
+    Pass module.libvirt-networks.networks directly, or a hand-built map. Extra fields in the
+    input value (id, prefix, subnet, ...) are silently dropped by the type constraint.
+  EOT
   type = map(object({
-    name        = string
     mode        = string
+    name        = optional(string, null)
     bridge_name = optional(string, null)
+    mac_address = optional(string, null)
+    wait_for_ip = optional(bool, true)
+    static_ip   = optional(string, null)
     gateway     = optional(string, null)
     dns_servers = optional(list(string), [])
   }))
-  default = {}
-}
-
-variable "expected_static_ip" {
-  description = "Expected static IPv4 (CIDR allowed, e.g. 10.0.1.163/16). Null disables static IP detection."
-  type        = string
-  default     = null
-}
-
-variable "expected_static_ip_interface_label" {
-  description = "Interface label to probe for expected_static_ip. Required when expected_static_ip is set."
-  type        = string
-  default     = null
 
   validation {
-    condition = (
-    var.expected_static_ip == null && var.expected_static_ip_interface_label == null
-    ) || (
-    var.expected_static_ip != null &&
-    var.expected_static_ip_interface_label != null &&
-    contains(
-      distinct(concat([for iface in var.interfaces : iface.label], keys(var.networks))),
-      var.expected_static_ip_interface_label
-    )
-    )
-    error_message = "When expected_static_ip is set, expected_static_ip_interface_label must match one of interfaces[*].label or networks keys."
+    condition     = length(var.networks) > 0
+    error_message = "At least one network attachment is required."
+  }
+
+  validation {
+    condition     = alltrue([for _, cfg in var.networks : contains(["bridge", "nat", "none"], cfg.mode)])
+    error_message = "Each network must have mode = bridge, nat, or none."
+  }
+
+  validation {
+    condition     = alltrue([for _, cfg in var.networks : cfg.mode != "bridge" || cfg.bridge_name != null])
+    error_message = "Bridge-mode networks require bridge_name."
+  }
+
+  validation {
+    condition     = alltrue([for _, cfg in var.networks : cfg.mode == "bridge" || cfg.name != null])
+    error_message = "nat/none networks require name."
+  }
+
+  validation {
+    condition     = alltrue([for _, cfg in var.networks : cfg.static_ip == null || can(cidrnetmask(cfg.static_ip))])
+    error_message = "static_ip must be an IPv4 CIDR (e.g. 10.0.1.163/16)."
   }
 }
 
 variable "static_ip_detection_timeout_seconds" {
-  description = "Timeout for guest-agent static IP detection on the selected interface."
+  description = "Timeout for guest-agent static IP detection when no interface can wait via DHCP lease."
   type        = number
   default     = 300
 
